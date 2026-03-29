@@ -156,6 +156,7 @@ function loadConfig() {
     },
     job: {
       lockFilePath: path.resolve(process.cwd(), process.env.LOCK_FILE_PATH || ".alerts-job.lock"),
+      stateFilePath: path.resolve(process.cwd(), process.env.STATE_FILE_PATH || ".alerts-last-state.json"),
       useStub,
       stubResponse: readAlertState("ALERTS_STUB_RESPONSE", "N")
     }

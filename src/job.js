@@ -3,6 +3,7 @@
 const { acquireRunLock } = require("./lock");
 const { Notifier } = require("./notifier");
 const { buildAlertsUrl, getWithRetry } = require("./httpClient");
+const { readLastState, writeLastState } = require("./stateStore");
 const { logger } = require("./logger");
 
 async function runJob(config) {
@@ -49,6 +50,27 @@ async function runJob(config) {
       alertState: response.alertState
     });
 
+    const currentState = {
+      regionId: config.api.regionId,
+      alertState: response.alertState
+    };
+    const lastState = await readLastState(config.job.stateFilePath);
+
+    if (lastState && lastState.regionId === currentState.regionId && lastState.alertState === currentState.alertState) {
+      logger.info("Alert state unchanged; notification skipped", {
+        regionId: currentState.regionId,
+        alertState: currentState.alertState,
+        stateFilePath: config.job.stateFilePath
+      });
+      return { skipped: false, notified: false, changed: false };
+    }
+
+    logger.info("Alert state changed; sending notification", {
+      previousState: lastState ? lastState.alertState : null,
+      currentState: currentState.alertState,
+      regionId: currentState.regionId
+    });
+
     const notifier = new Notifier(config.telegram);
     await notifier.notify({
       regionId: config.api.regionId,
@@ -57,12 +79,14 @@ async function runJob(config) {
       source: config.job.useStub ? "stub" : "api",
       rawBody: response.rawBody
     });
+    await writeLastState(config.job.stateFilePath, currentState);
 
     logger.info("Notification step completed", {
-      regionId: config.api.regionId
+      regionId: config.api.regionId,
+      stateFilePath: config.job.stateFilePath
     });
 
-    return { skipped: false };
+    return { skipped: false, notified: true, changed: true };
   } finally {
     await releaseLock();
   }

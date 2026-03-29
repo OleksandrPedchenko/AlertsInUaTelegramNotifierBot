@@ -4,3 +4,4 @@ node_modules/
 *.log
 logs/
 .alerts-job.lock
+.alerts-last-state.json

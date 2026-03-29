@@ -35,6 +35,7 @@ One-shot Node.js job that fetches active air raid alert state for a region and t
 - `TG_HTTP_MAX_RETRIES` (optional): Telegram request retries for transient failures, default `2`.
 - `TG_HTTP_RETRY_BASE_DELAY_MS` (optional): Telegram retry base delay in milliseconds, default `500`.
 - `LOCK_FILE_PATH` (optional): lock file path, default `.alerts-job.lock`.
+- `STATE_FILE_PATH` (optional): persisted last-seen state file, default `.alerts-last-state.json`.
 
 ## Cron Setup (Every N Minutes)
 
@@ -57,5 +58,6 @@ mkdir -p logs
 - Successful API response is expected to be a single char: `N`, `A`, or `P`.
 - For active development without consuming API limits, set `ALERTS_USE_STUB=true`.
 - Notifications are sent via Telegram Bot API `sendMessage`.
+- Notification is sent only when current state differs from the previously stored state.
 - The job uses a lock file to avoid overlapping runs.
 - Logs are emitted as JSON lines for easier ingestion in production logging systems.
