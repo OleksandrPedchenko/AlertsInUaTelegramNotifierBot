@@ -42,6 +42,8 @@ One-shot Node.js job that fetches active air raid alert state for a region and t
 - `TG_HTTP_RETRY_BASE_DELAY_MS` (optional): Telegram retry base delay in milliseconds, default `500`.
 - `LOCK_FILE_PATH` (optional): lock file path, default `.alerts-job.lock`.
 - `STATE_FILE_PATH` (optional): persisted last-seen state file, default `.alerts-last-state.json`.
+- `LOG_FILE_PATH` (optional): JSON-lines log file path (resolved from project root), default `alerts.log`.
+- `LOG_RETENTION_DAYS` (optional): keeps only log entries newer than `N` days in `LOG_FILE_PATH` (`0` disables trimming), default `7`.
 
 ## Cron Setup (Every N Minutes)
 
@@ -50,13 +52,7 @@ Use system cron to execute this one-shot script every `N` minutes.
 Example for every `5` minutes:
 
 ```cron
-*/5 * * * * cd /Users/olexandrpedchenko/projects/AlertsTgBot && /usr/bin/env node src/index.js >> /Users/olexandrpedchenko/projects/AlertsTgBot/logs/cron.log 2>&1
-```
-
-Before enabling cron logging, create the logs directory:
-
-```bash
-mkdir -p logs
+*/5 * * * * cd /Users/olexandrpedchenko/projects/AlertsTgBot && /usr/bin/env node src/index.js
 ```
 
 ## Notes
@@ -73,3 +69,4 @@ mkdir -p logs
 - Set `TREAT_P_AS_A=true` if your business rule requires treating partial alert (`P`) as full alert (`A`).
 - The job uses a lock file to avoid overlapping runs.
 - Logs are emitted as JSON lines for easier ingestion in production logging systems.
+- Logs are persisted to `LOG_FILE_PATH` (default `alerts.log` in project root). The default `.gitignore` already excludes `*.log`.
