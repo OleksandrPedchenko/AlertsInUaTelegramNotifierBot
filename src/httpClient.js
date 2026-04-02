@@ -1,6 +1,7 @@
 "use strict";
 
 const { logger } = require("./logger");
+const { AlertsMatcher } = require("./alertsMatcher");
 
 class HttpRequestError extends Error {
   constructor(message, details = {}) {
@@ -45,11 +46,54 @@ function parseAlertState(responseText) {
   return ALERT_STATES.has(state) ? state : null;
 }
 
+function parseJsonBody(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+function parseActiveAlertsState(responseText, matchCriteria) {
+  const payload = parseJsonBody(responseText);
+  if (!payload || !Array.isArray(payload.alerts)) {
+    throw new HttpRequestError("Unexpected active alerts API response. Expected JSON object with alerts array", {
+      body: responseText,
+      retriable: false
+    });
+  }
+
+  if (!matchCriteria || typeof matchCriteria !== "object" || Array.isArray(matchCriteria)) {
+    throw new HttpRequestError("Active alerts match criteria must be a JSON object", {
+      body: responseText,
+      retriable: false
+    });
+  }
+
+  if (Object.keys(matchCriteria).length === 0) {
+    throw new HttpRequestError("Active alerts match criteria must be a non-empty JSON object", {
+      body: responseText,
+      retriable: false
+    });
+  }
+
+  const matcher = new AlertsMatcher(payload.alerts);
+  const matchedAlert = matcher.findByCriteria(matchCriteria);
+  return matchedAlert ? "A" : "N";
+}
+
 function isNetworkError(error) {
   return error instanceof TypeError;
 }
 
-async function getWithRetry({ url, token, timeoutMs, maxRetries, retryBaseDelayMs }) {
+async function getWithRetry({
+  url,
+  token,
+  timeoutMs,
+  maxRetries,
+  retryBaseDelayMs,
+  responseHandler
+}) {
   const maxAttempts = maxRetries + 1;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
@@ -82,8 +126,12 @@ async function getWithRetry({ url, token, timeoutMs, maxRetries, retryBaseDelayM
         });
       }
 
-      const alertState = parseAlertState(responseText);
-      if (alertState === null) {
+      const parsedState =
+        typeof responseHandler === "function"
+          ? responseHandler(responseText)
+          : parseAlertState(responseText);
+      const alertState = String(parsedState || "").trim().toUpperCase();
+      if (!ALERT_STATES.has(alertState)) {
         throw new HttpRequestError("Unexpected API response. Expected a single alert state char: N, A, or P", {
           status: response.status,
           body: responseText,
@@ -139,6 +187,7 @@ async function getWithRetry({ url, token, timeoutMs, maxRetries, retryBaseDelayM
 
 module.exports = {
   buildAlertsUrl,
+  parseActiveAlertsState,
   getWithRetry,
   HttpRequestError
 };

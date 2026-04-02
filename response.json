@@ -1,0 +1,38 @@
+{
+  "alerts": [
+    {
+      "id": 192335,
+      "location_title": "Лубенський район",
+      "location_type": "raion",
+      "started_at": "2026-03-29T13:34:41.000Z",
+      "finished_at": null,
+      "updated_at": "2026-03-29T13:34:42.428Z",
+      "alert_type": "air_raid",
+      "location_oblast": "Полтавська область",
+      "location_uid": "106",
+      "notes": null,
+      "country": null,
+      "deleted_at": null,
+      "calculated": null,
+      "location_oblast_uid": 106
+    },
+    {
+      "id": 192336,
+      "location_title": "Миргородський район",
+      "location_type": "raion",
+      "started_at": "2026-03-29T13:34:49.000Z",
+      "finished_at": null,
+      "updated_at": "2026-03-29T13:34:52.471Z",
+      "alert_type": "air_raid",
+      "location_oblast": "Полтавська область",
+      "location_uid": "108",
+      "notes": null,
+      "country": null,
+      "deleted_at": null,
+      "calculated": null,
+      "location_oblast_uid": 108
+    }
+  ],
+  "meta": { "last_updated_at": "2026/03/29 13:43:12 +0000", "type": "full" },
+  "disclaimer": "If you use python try our official alerts_in_ua PiP package."
+}

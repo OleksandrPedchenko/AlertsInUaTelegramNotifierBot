@@ -76,6 +76,39 @@ function readBoolean(key, fallback = false) {
   throw new ConfigError(`${key} must be a boolean (true/false)`);
 }
 
+function readOptionalJsonObject(key) {
+  const raw = process.env[key];
+  if (raw === undefined || raw.trim() === "") {
+    return null;
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new ConfigError(`${key} must be a valid JSON object`);
+  }
+
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new ConfigError(`${key} must be a JSON object`);
+  }
+
+  return parsed;
+}
+
+function readRequiredJsonObject(key) {
+  const parsed = readOptionalJsonObject(key);
+  if (!parsed) {
+    throw new ConfigError(`Missing required environment variable: ${key}`);
+  }
+
+  if (Object.keys(parsed).length === 0) {
+    throw new ConfigError(`${key} must be a non-empty JSON object`);
+  }
+
+  return parsed;
+}
+
 function readAlertState(key, fallback) {
   const raw = (process.env[key] || fallback).trim().toUpperCase();
   if (!ALERT_STATES.has(raw)) {
@@ -126,14 +159,30 @@ function readPathTemplate() {
   return template;
 }
 
+function readActivePathTemplate() {
+  const template = (process.env.ALERTS_ACTIVE_API_PATH || "/v1/alerts/active.json").trim();
+
+  if (!template.startsWith("/")) {
+    throw new ConfigError("ALERTS_ACTIVE_API_PATH must start with '/'");
+  }
+
+  return template;
+}
+
 function loadConfig() {
   const useStub = readBoolean("ALERTS_USE_STUB", false);
+  const useActiveEndpoint = readBoolean("ALERTS_USE_ACTIVE_ENDPOINT", false);
+  const activeMatchCriteria = useActiveEndpoint
+    ? readRequiredJsonObject("ALERTS_ACTIVE_MATCH_CRITERIA")
+    : readOptionalJsonObject("ALERTS_ACTIVE_MATCH_CRITERIA");
 
   return {
     api: {
       host: readApiHost(),
-      pathTemplate: readPathTemplate(),
+      pathTemplate: useActiveEndpoint ? readActivePathTemplate() : readPathTemplate(),
       regionId: readNumber("REGION_ID", 19, { integer: true, min: 1 }),
+      useActiveEndpoint,
+      activeMatchCriteria,
       token: useStub ? readOptionalString("ALERTS_API_TOKEN") : readRequiredString("ALERTS_API_TOKEN"),
       timeoutMs: readNumber("HTTP_TIMEOUT_MS", 10000, { integer: true, min: 1000 }),
       maxRetries: readNumber("HTTP_MAX_RETRIES", 2, { integer: true, min: 0, max: 10 }),
@@ -157,6 +206,10 @@ function loadConfig() {
     job: {
       lockFilePath: path.resolve(process.cwd(), process.env.LOCK_FILE_PATH || ".alerts-job.lock"),
       stateFilePath: path.resolve(process.cwd(), process.env.STATE_FILE_PATH || ".alerts-last-state.json"),
+      activeStubFilePath: path.resolve(
+        process.cwd(),
+        readOptionalString("ALERTS_ACTIVE_STUB_FILE") || "response.json"
+      ),
       alwaysSendTgMessage: readBoolean("ALWAYS_SEND_TG_MESSAGE", false),
       treatPAsA: readBoolean("TREAT_P_AS_A", false),
       useStub,

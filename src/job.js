@@ -1,8 +1,14 @@
 "use strict";
 
+const { readFile } = require("fs/promises");
 const { acquireRunLock } = require("./lock");
 const { Notifier } = require("./notifier");
-const { buildAlertsUrl, getWithRetry } = require("./httpClient");
+const {
+  buildAlertsUrl,
+  getWithRetry,
+  parseActiveAlertsState,
+  HttpRequestError
+} = require("./httpClient");
 const { readLastState, writeLastState } = require("./stateStore");
 const { getRegionNameById } = require("./regionCatalog");
 const { logger } = require("./logger");
@@ -17,31 +23,66 @@ async function runJob(config) {
   }
 
   try {
+    const regionName = getRegionNameById(config.api.regionId);
     const requestUrl = buildAlertsUrl(config.api);
     logger.info("Starting alerts polling job", {
       host: config.api.host,
       regionId: config.api.regionId,
+      regionName,
       requestUrl,
+      endpointMode: config.api.useActiveEndpoint ? "active-json" : "legacy-char",
       useStub: config.job.useStub
     });
 
     let response;
     if (config.job.useStub) {
-      response = {
-        status: 200,
-        alertState: config.job.stubResponse,
-        rawBody: config.job.stubResponse
-      };
-      logger.warn("Stub mode enabled. External API request skipped", {
-        stubResponse: config.job.stubResponse
-      });
+      if (config.api.useActiveEndpoint) {
+        let stubResponseBody;
+        try {
+          stubResponseBody = await readFile(config.job.activeStubFilePath, "utf8");
+        } catch (error) {
+          throw new HttpRequestError(
+            `Failed to read active endpoint stub file: ${config.job.activeStubFilePath}`,
+            { cause: error, retriable: false }
+          );
+        }
+
+        const parsedState = parseActiveAlertsState(
+          stubResponseBody,
+          config.api.activeMatchCriteria
+        );
+
+        response = {
+          status: 200,
+          alertState: parsedState,
+          rawBody: stubResponseBody
+        };
+
+        logger.warn("Stub mode enabled. External API request skipped", {
+          endpointMode: "active-json",
+          activeStubFilePath: config.job.activeStubFilePath
+        });
+      } else {
+        response = {
+          status: 200,
+          alertState: config.job.stubResponse,
+          rawBody: config.job.stubResponse
+        };
+        logger.warn("Stub mode enabled. External API request skipped", {
+          endpointMode: "legacy-char",
+          stubResponse: config.job.stubResponse
+        });
+      }
     } else {
       response = await getWithRetry({
         url: requestUrl,
         token: config.api.token,
         timeoutMs: config.api.timeoutMs,
         maxRetries: config.api.maxRetries,
-        retryBaseDelayMs: config.api.retryBaseDelayMs
+        retryBaseDelayMs: config.api.retryBaseDelayMs,
+        responseHandler: config.api.useActiveEndpoint
+          ? (responseText) => parseActiveAlertsState(responseText, config.api.activeMatchCriteria)
+          : undefined
       });
     }
 
@@ -53,14 +94,14 @@ async function runJob(config) {
       regionId: config.api.regionId,
       alertState: response.alertState,
       normalizedAlertState,
-      treatPAsA: config.job.treatPAsA
+      treatPAsA: config.job.treatPAsA,
+      endpointMode: config.api.useActiveEndpoint ? "active-json" : "legacy-char"
     });
 
     const currentState = {
       regionId: config.api.regionId,
       alertState: normalizedAlertState
     };
-    const regionName = getRegionNameById(config.api.regionId);
     const lastState = await readLastState(config.job.stateFilePath);
     const isSameState =
       Boolean(lastState) &&
