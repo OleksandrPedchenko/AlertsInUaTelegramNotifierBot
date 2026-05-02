@@ -57,15 +57,16 @@ async function writeLastState(filePath, state) {
   await fs.mkdir(dirPath, { recursive: true });
 
   const tmpPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
-  const payload = JSON.stringify(
-    {
-      ...normalized,
-      lastModified: normalized.lastModified || null,
-      updatedAt: new Date().toISOString()
-    },
-    null,
-    2
-  );
+  const payloadObj = {
+    ...normalized,
+    updatedAt: new Date().toISOString()
+  };
+
+  if (normalized.lastModified) {
+    payloadObj.lastModified = normalized.lastModified;
+  }
+
+  const payload = JSON.stringify(payloadObj, null, 2);
 
   try {
     await fs.writeFile(tmpPath, `${payload}\n`, { encoding: "utf8", mode: 0o600 });

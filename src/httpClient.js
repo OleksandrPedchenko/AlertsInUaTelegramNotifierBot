@@ -112,12 +112,6 @@ async function getWithRetry({
 
         if (ifModifiedSince) {
           headers["If-Modified-Since"] = ifModifiedSince;
-          logger.info("Sending request with If-Modified-Since header", {
-            url,
-            ifModifiedSince
-          });
-        } else {
-          logger.info("Sending request without If-Modified-Since header", { url });
         }
 
         response = await fetch(url, {
@@ -130,11 +124,13 @@ async function getWithRetry({
       }
 
       if (response.status === 304) {
-        const lastModifiedHeader = response.headers.get("last-modified") || null;
-        logger.info("Received 304 Not Modified response", {
-          url,
-          lastModified: lastModifiedHeader
-        });
+        let lastModifiedHeader;
+        if (response.headers.get) {
+          lastModifiedHeader = response.headers.get("last-modified");
+        } else {
+          lastModifiedHeader = response.headers["last-modified"];
+        }
+        lastModifiedHeader = lastModifiedHeader ? String(lastModifiedHeader).trim() : null;
 
         return {
           status: response.status,
@@ -145,12 +141,13 @@ async function getWithRetry({
       }
 
       const responseText = await response.text();
-      const lastModifiedHeader = response.headers.get("last-modified") || null;
-      logger.info("Received HTTP response", {
-        url,
-        status: response.status,
-        lastModified: lastModifiedHeader
-      });
+      let lastModifiedHeader;
+      if (response.headers.get) {
+        lastModifiedHeader = response.headers.get("last-modified");
+      } else {
+        lastModifiedHeader = response.headers["last-modified"];
+      }
+      lastModifiedHeader = lastModifiedHeader ? String(lastModifiedHeader).trim() : null;
 
       if (!response.ok) {
         throw new HttpRequestError(`HTTP request failed with status ${response.status}`, {

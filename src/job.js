@@ -36,10 +36,6 @@ async function runJob(config) {
 
     let response;
     const lastState = await readLastState(config.job.stateFilePath);
-    logger.info("Loaded cached alert state", {
-      stateFilePath: config.job.stateFilePath,
-      lastState
-    });
 
     if (config.job.useStub) {
       if (config.api.useActiveEndpoint) {
@@ -141,6 +137,9 @@ async function runJob(config) {
       normalizedPreviousState === currentState.alertState;
     const forceNotify = config.job.alwaysSendTgMessage;
 
+    // Always write the state to update lastModified even if alertState is unchanged
+    await writeLastState(config.job.stateFilePath, currentState);
+
     if (isSameState && !forceNotify) {
       logger.info("Alert state unchanged; notification skipped", {
         regionId: currentState.regionId,
@@ -176,7 +175,6 @@ async function runJob(config) {
       source: config.job.useStub ? "stub" : "api",
       rawBody: response.rawBody
     });
-    await writeLastState(config.job.stateFilePath, currentState);
 
     logger.info("Notification step completed", {
       regionId: config.api.regionId,
