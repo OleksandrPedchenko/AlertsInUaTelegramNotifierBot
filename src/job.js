@@ -35,6 +35,8 @@ async function runJob(config) {
     });
 
     let response;
+    const lastState = await readLastState(config.job.stateFilePath);
+
     if (config.job.useStub) {
       if (config.api.useActiveEndpoint) {
         let stubResponseBody;
@@ -80,10 +82,31 @@ async function runJob(config) {
         timeoutMs: config.api.timeoutMs,
         maxRetries: config.api.maxRetries,
         retryBaseDelayMs: config.api.retryBaseDelayMs,
+        ifModifiedSince: lastState ? lastState.lastModified : null,
         responseHandler: config.api.useActiveEndpoint
           ? (responseText) => parseActiveAlertsState(responseText, config.api.activeMatchCriteria)
           : undefined
       });
+
+      if (response.status === 304) {
+        if (!lastState) {
+          throw new HttpRequestError(
+            "Received 304 Not Modified but previous state cache is unavailable",
+            { retriable: false }
+          );
+        }
+
+        logger.info("Alerts data not modified since last request", {
+          regionId: config.api.regionId,
+          lastModified: lastState.lastModified
+        });
+
+        response.alertState = lastState.alertState;
+        response.rawBody = "";
+        response.lastModified = response.lastModified || lastState.lastModified;
+      }
+
+      response.lastModified = response.lastModified || (lastState ? lastState.lastModified : null);
     }
 
     const normalizedAlertState =
@@ -98,16 +121,24 @@ async function runJob(config) {
       endpointMode: config.api.useActiveEndpoint ? "active-json" : "legacy-char"
     });
 
+    const normalizedPreviousState =
+      lastState && config.job.treatPAsA && lastState.alertState === "P"
+        ? "A"
+        : lastState?.alertState || null;
+
     const currentState = {
       regionId: config.api.regionId,
-      alertState: normalizedAlertState
+      alertState: normalizedAlertState,
+      lastModified: response.lastModified || (lastState ? lastState.lastModified : null)
     };
-    const lastState = await readLastState(config.job.stateFilePath);
     const isSameState =
       Boolean(lastState) &&
       lastState.regionId === currentState.regionId &&
-      lastState.alertState === currentState.alertState;
+      normalizedPreviousState === currentState.alertState;
     const forceNotify = config.job.alwaysSendTgMessage;
+
+    // Always write the state to update lastModified even if alertState is unchanged
+    await writeLastState(config.job.stateFilePath, currentState);
 
     if (isSameState && !forceNotify) {
       logger.info("Alert state unchanged; notification skipped", {
@@ -144,7 +175,6 @@ async function runJob(config) {
       source: config.job.useStub ? "stub" : "api",
       rawBody: response.rawBody
     });
-    await writeLastState(config.job.stateFilePath, currentState);
 
     logger.info("Notification step completed", {
       regionId: config.api.regionId,

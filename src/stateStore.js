@@ -12,6 +12,7 @@ function normalizeStateRecord(candidate) {
 
   const regionId = Number(candidate.regionId);
   const alertState = String(candidate.alertState || "").trim().toUpperCase();
+  const lastModified = candidate.lastModified ? String(candidate.lastModified).trim() : null;
 
   if (!Number.isInteger(regionId) || regionId < 1) {
     return null;
@@ -23,7 +24,8 @@ function normalizeStateRecord(candidate) {
 
   return {
     regionId,
-    alertState
+    alertState,
+    lastModified
   };
 }
 
@@ -55,14 +57,16 @@ async function writeLastState(filePath, state) {
   await fs.mkdir(dirPath, { recursive: true });
 
   const tmpPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
-  const payload = JSON.stringify(
-    {
-      ...normalized,
-      updatedAt: new Date().toISOString()
-    },
-    null,
-    2
-  );
+  const payloadObj = {
+    ...normalized,
+    updatedAt: new Date().toISOString()
+  };
+
+  if (normalized.lastModified) {
+    payloadObj.lastModified = normalized.lastModified;
+  }
+
+  const payload = JSON.stringify(payloadObj, null, 2);
 
   try {
     await fs.writeFile(tmpPath, `${payload}\n`, { encoding: "utf8", mode: 0o600 });

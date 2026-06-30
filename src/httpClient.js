@@ -92,6 +92,7 @@ async function getWithRetry({
   timeoutMs,
   maxRetries,
   retryBaseDelayMs,
+  ifModifiedSince,
   responseHandler
 }) {
   const maxAttempts = maxRetries + 1;
@@ -103,20 +104,50 @@ async function getWithRetry({
 
       let response;
       try {
+        const headers = {
+          Accept: "text/plain, application/json",
+          Authorization: `Bearer ${token}`,
+          "User-Agent": "alerts-tg-bot/1.0"
+        };
+
+        if (ifModifiedSince) {
+          headers["If-Modified-Since"] = ifModifiedSince;
+        }
+
         response = await fetch(url, {
           method: "GET",
-          headers: {
-            Accept: "text/plain, application/json",
-            Authorization: `Bearer ${token}`,
-            "User-Agent": "alerts-tg-bot/1.0"
-          },
+          headers,
           signal: controller.signal
         });
       } finally {
         clearTimeout(timeoutId);
       }
 
+      if (response.status === 304) {
+        let lastModifiedHeader;
+        if (response.headers.get) {
+          lastModifiedHeader = response.headers.get("last-modified");
+        } else {
+          lastModifiedHeader = response.headers["last-modified"];
+        }
+        lastModifiedHeader = lastModifiedHeader ? String(lastModifiedHeader).trim() : null;
+
+        return {
+          status: response.status,
+          alertState: null,
+          rawBody: "",
+          lastModified: lastModifiedHeader
+        };
+      }
+
       const responseText = await response.text();
+      let lastModifiedHeader;
+      if (response.headers.get) {
+        lastModifiedHeader = response.headers.get("last-modified");
+      } else {
+        lastModifiedHeader = response.headers["last-modified"];
+      }
+      lastModifiedHeader = lastModifiedHeader ? String(lastModifiedHeader).trim() : null;
 
       if (!response.ok) {
         throw new HttpRequestError(`HTTP request failed with status ${response.status}`, {
@@ -142,7 +173,8 @@ async function getWithRetry({
       return {
         status: response.status,
         alertState,
-        rawBody: responseText
+        rawBody: responseText,
+        lastModified: lastModifiedHeader
       };
     } catch (error) {
       const isTimeout = error && error.name === "AbortError";
