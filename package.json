@@ -5,6 +5,8 @@
   "main": "src/jobs/alerts/index.js",
   "scripts": {
     "start": "node src/jobs/alerts/index.js",
+    "start:alerts": "node src/jobs/alerts/index.js",
+    "start:light": "node src/jobs/light/index.js",
     "test": "node --test"
   },
   "keywords": [
@@ -18,6 +20,7 @@
     "node": ">=18.18.0"
   },
   "dependencies": {
-    "dotenv": "^17.3.1"
+    "dotenv": "^17.3.1",
+    "jsdom": "^22.1.0"
   }
 }

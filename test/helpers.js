@@ -12,6 +12,23 @@ function createSilentLogger() {
   };
 }
 
+function createMemoryLogger() {
+  const entries = [];
+
+  return {
+    entries,
+    info(message, meta) {
+      entries.push({ level: "info", message, meta });
+    },
+    warn(message, meta) {
+      entries.push({ level: "warn", message, meta });
+    },
+    error(message, meta) {
+      entries.push({ level: "error", message, meta });
+    }
+  };
+}
+
 function createTextResponse(status, body, headers = {}) {
   const ok = status >= 200 && status <= 299;
   return {
@@ -38,6 +55,7 @@ async function createTempDir() {
 }
 
 module.exports = {
+  createMemoryLogger,
   createSilentLogger,
   createTempDir,
   createTextResponse

@@ -35,6 +35,40 @@ function getPreviousFingerprint(plugin, previousRecord, config) {
   return null;
 }
 
+function normalizeNotifications(notificationOutput) {
+  if (!notificationOutput) {
+    return [];
+  }
+
+  const rawNotifications = Array.isArray(notificationOutput)
+    ? notificationOutput
+    : [notificationOutput];
+
+  return rawNotifications
+    .map((notification) => {
+      if (!notification) {
+        return null;
+      }
+
+      if (typeof notification === "string") {
+        return {
+          type: "default",
+          text: notification
+        };
+      }
+
+      if (typeof notification === "object" && typeof notification.text === "string") {
+        return {
+          type: notification.type || "default",
+          text: notification.text
+        };
+      }
+
+      return null;
+    })
+    .filter((notification) => notification && notification.text);
+}
+
 async function runPluginJob(plugin, env = process.env, options = {}) {
   const readers = createEnvReader(env, { cwd: options.cwd || process.cwd() });
   const config =
@@ -120,17 +154,19 @@ async function runPluginJob(plugin, env = process.env, options = {}) {
       };
     }
 
-    const notificationText = plugin.buildNotification({
+    const notificationOutput = await plugin.buildNotification({
       previousState,
       previousRecord,
       currentState,
       currentFingerprint,
       previousFingerprint,
       changed,
-      config
+      config,
+      deps
     });
+    const notifications = normalizeNotifications(notificationOutput);
 
-    if (!notificationText) {
+    if (notifications.length === 0) {
       logger.info("Notification text is empty; notification skipped", {
         jobName: plugin.name,
         stateKey
@@ -143,13 +179,42 @@ async function runPluginJob(plugin, env = process.env, options = {}) {
       };
     }
 
-    await sendTelegramMessage(notificationText, config.telegram, {
-      fetchImpl: options.fetchImpl,
-      logger
-    });
+    for (const notification of notifications) {
+      await sendTelegramMessage(notification.text, config.telegram, {
+        fetchImpl: options.fetchImpl,
+        logger
+      });
+    }
+
+    if (typeof plugin.afterNotificationSuccess === "function") {
+      const updatedState = await plugin.afterNotificationSuccess({
+        previousState,
+        previousRecord,
+        currentState,
+        currentFingerprint,
+        previousFingerprint,
+        changed,
+        config,
+        deps,
+        notifications
+      });
+
+      if (updatedState) {
+        await writeJobState(
+          stateFilePath,
+          stateKey,
+          updatedState,
+          plugin.getStateFingerprint(updatedState),
+          {
+            jobName: plugin.name
+          }
+        );
+      }
+    }
 
     logger.info("Notification step completed", {
       jobName: plugin.name,
+      notificationCount: notifications.length,
       stateKey,
       stateFilePath
     });
@@ -167,5 +232,6 @@ async function runPluginJob(plugin, env = process.env, options = {}) {
 
 module.exports = {
   createFallbackLogger,
+  normalizeNotifications,
   runPluginJob
 };
