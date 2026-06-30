@@ -18,6 +18,13 @@ One-shot Node.js job that fetches active air raid alert state for a region and t
    npm start
    ```
 
+   This runs the dedicated alerts cron entrypoint at `src/jobs/alerts/index.js`.
+
+4. Run tests:
+   ```bash
+   npm test
+   ```
+
 ## Environment Variables
 
 - `ALERTS_API_TOKEN` (required): bearer token for Alerts API.
@@ -52,8 +59,14 @@ Use system cron to execute this one-shot script every `N` minutes.
 Example for every `5` minutes:
 
 ```cron
-*/5 * * * * cd /Users/olexandrpedchenko/projects/AlertsTgBot && /usr/bin/env node src/index.js
+*/5 * * * * cd /Users/olexandrpedchenko/projects/AlertsTgBot && /usr/bin/env node src/jobs/alerts/index.js
 ```
+
+## Project Layout
+
+- `src/lib/`: shared one-shot job runner, lock, logger, config readers, HTTP retry client, Telegram sender, and keyed JSON state store.
+- `src/jobs/alerts/`: alert-specific config, API parsing, state fingerprinting, and Telegram message text.
+- `src/jobs/light/`: reserved for the future POE queue/subqueue job. Its planned state key is the configured `LIGHT_QUEUE` + `LIGHT_SUB_QUEUE`.
 
 ## Notes
 

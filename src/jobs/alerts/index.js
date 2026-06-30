@@ -1,0 +1,81 @@
+"use strict";
+
+const dotenv = require("dotenv");
+const { ConfigError } = require("../../lib/config");
+const { HttpRequestError } = require("../../lib/httpClient");
+const { createLoggerFromEnv } = require("../../lib/logger");
+const { NotificationError } = require("../../lib/telegramNotifier");
+const { runPluginJob } = require("../../lib/runner");
+const { alertsPlugin } = require("./plugin");
+
+dotenv.config({ quiet: true });
+
+async function runAlertsJob(config, options = {}) {
+  return runPluginJob(alertsPlugin, process.env, {
+    ...options,
+    config
+  });
+}
+
+async function main(options = {}) {
+  const logger = options.logger || createLoggerFromEnv(process.env);
+
+  try {
+    await runPluginJob(alertsPlugin, process.env, {
+      ...options,
+      logger
+    });
+  } catch (error) {
+    if (error instanceof ConfigError) {
+      logger.error("Configuration error", { error: error.message });
+      process.exitCode = 1;
+      return;
+    }
+
+    if (error instanceof HttpRequestError) {
+      logger.error("HTTP request failed", {
+        error: error.message,
+        status: error.status,
+        body: error.body
+      });
+      process.exitCode = 1;
+      return;
+    }
+
+    if (error instanceof NotificationError) {
+      logger.error("Notification failed", {
+        error: error.message,
+        status: error.status,
+        body: error.body
+      });
+      process.exitCode = 1;
+      return;
+    }
+
+    logger.error("Unexpected job failure", { error });
+    process.exitCode = 1;
+  }
+}
+
+if (require.main === module) {
+  process.on("unhandledRejection", (reason) => {
+    const logger = createLoggerFromEnv(process.env);
+    logger.error("Unhandled promise rejection", {
+      reason: reason instanceof Error ? reason : new Error(String(reason))
+    });
+  });
+
+  process.on("uncaughtException", (error) => {
+    const logger = createLoggerFromEnv(process.env);
+    logger.error("Uncaught exception", { error });
+    process.exit(1);
+  });
+
+  main();
+}
+
+module.exports = {
+  alertsPlugin,
+  main,
+  runAlertsJob
+};
