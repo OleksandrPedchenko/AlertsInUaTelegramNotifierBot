@@ -3,6 +3,9 @@
 const { ConfigError } = require("../../lib/config");
 
 const ALERT_STATES = new Set(["N", "A", "P"]);
+const DEFAULT_LOKI_IP = "192.168.0.41";
+const DEFAULT_LOKI_PORT = 3100;
+const DEFAULT_LOKI_TIMEOUT_MS = 2000;
 
 function readAlertState(readers, key, fallback) {
   const raw = readers.readOptionalString(key, fallback).trim().toUpperCase();
@@ -40,6 +43,25 @@ function readActivePathTemplate(readers) {
   }
 
   return template;
+}
+
+function readLokiConfig(readers) {
+  return {
+    enabled: true,
+    protocol: readers.readOptionalString("LOKI_PROTOCOL", "http"),
+    ip: readers.readOptionalString("LOKI_IP", DEFAULT_LOKI_IP),
+    port: readers.readNumber("LOKI_PORT", DEFAULT_LOKI_PORT, {
+      integer: true,
+      min: 1,
+      max: 65535
+    }),
+    appLabel: readers.readOptionalString("LOKI_APP_LABEL", "alerts-tg-bot"),
+    timeoutMs: readers.readNumber("LOKI_TIMEOUT_MS", DEFAULT_LOKI_TIMEOUT_MS, {
+      integer: true,
+      min: 1,
+      max: 60000
+    })
+  };
 }
 
 function loadAlertsConfig(_env, readers) {
@@ -96,7 +118,8 @@ function loadAlertsConfig(_env, readers) {
     },
     log: {
       logFilePath: readers.readOptionalString("LOG_FILE_PATH", "alerts.log"),
-      retentionDays: readers.readNumber("LOG_RETENTION_DAYS", 7, { integer: true, min: 0 })
+      retentionDays: readers.readNumber("LOG_RETENTION_DAYS", 7, { integer: true, min: 0 }),
+      loki: readLokiConfig(readers)
     }
   };
 }

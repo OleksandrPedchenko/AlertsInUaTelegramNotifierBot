@@ -54,20 +54,24 @@ async function main(options = {}) {
 
     logger.error("Unexpected job failure", { error });
     process.exitCode = 1;
+  } finally {
+    await logger.flush?.();
   }
 }
 
 if (require.main === module) {
-  process.on("unhandledRejection", (reason) => {
+  process.on("unhandledRejection", async (reason) => {
     const logger = createLoggerFromEnv(process.env);
     logger.error("Unhandled promise rejection", {
       reason: reason instanceof Error ? reason : new Error(String(reason))
     });
+    await logger.flush?.();
   });
 
-  process.on("uncaughtException", (error) => {
+  process.on("uncaughtException", async (error) => {
     const logger = createLoggerFromEnv(process.env);
     logger.error("Uncaught exception", { error });
+    await logger.flush?.();
     process.exit(1);
   });
 

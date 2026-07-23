@@ -11,7 +11,8 @@ function createFallbackLogger() {
   return {
     info() {},
     warn() {},
-    error() {}
+    error() {},
+    async flush() {}
   };
 }
 
@@ -73,10 +74,12 @@ async function runPluginJob(plugin, env = process.env, options = {}) {
   const readers = createEnvReader(env, { cwd: options.cwd || process.cwd() });
   const config =
     options.config || plugin.loadConfig(env, readers);
+  const ownsLogger = !options.logger;
   const logger =
     options.logger ||
     createLogger({
       cwd: readers.cwd,
+      fetchImpl: options.fetchImpl,
       ...(config.log || {})
     });
 
@@ -87,6 +90,9 @@ async function runPluginJob(plugin, env = process.env, options = {}) {
       jobName: plugin.name,
       lockFilePath
     });
+    if (ownsLogger) {
+      await logger.flush?.();
+    }
     return { jobName: plugin.name, skipped: true };
   }
 
@@ -227,6 +233,9 @@ async function runPluginJob(plugin, env = process.env, options = {}) {
     };
   } finally {
     await releaseLock();
+    if (ownsLogger) {
+      await logger.flush?.();
+    }
   }
 }
 

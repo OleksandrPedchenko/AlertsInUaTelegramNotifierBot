@@ -67,6 +67,11 @@ One-shot Node.js job that fetches active air raid alert state for a region and t
 - `STATE_FILE_PATH` (optional): persisted last-seen state file, default `.alerts-last-state.json`.
 - `LOG_FILE_PATH` (optional): JSON-lines log file path (resolved from project root), default `alerts.log`.
 - `LOG_RETENTION_DAYS` (optional): keeps only log entries newer than `N` days in `LOG_FILE_PATH` (`0` disables trimming), default `7`.
+- `LOKI_IP` (optional): Loki host/IP for pushing logs, default `192.168.0.41`.
+- `LOKI_PORT` (optional): Loki HTTP port, default `3100`.
+- `LOKI_PROTOCOL` (optional): Loki protocol, default `http`.
+- `LOKI_APP_LABEL` (optional): Loki `app` label value, default `alerts-tg-bot`.
+- `LOKI_TIMEOUT_MS` (optional): Loki push timeout in milliseconds, default `2000`.
 
 ### Light Job Variables
 
@@ -129,6 +134,7 @@ Example light job every minute:
 - The job uses a lock file to avoid overlapping runs.
 - Logs are emitted as JSON lines for easier ingestion in production logging systems.
 - Logs are persisted to `LOG_FILE_PATH` (default `alerts.log` in project root). The default `.gitignore` already excludes `*.log`.
+- Logs are also buffered during a run and pushed to Loki after the job finishes at `LOKI_PROTOCOL://LOKI_IP:LOKI_PORT/loki/api/v1/push` with `app`, `level`, and `job` stream labels.
 - The light job fetches both POE endpoints from the xbar script, parses today/tomorrow tables, and sends a Telegram message only when the selected queue/subqueue schedule fingerprint changes.
 - For light job development without touching POE, set `LIGHT_USE_STUB=true`; by default it parses `light-example.html` from the project root.
 - When Gemini is enabled, changed light notifications send normalized previous/current segments to Gemini using `models/{model}:generateContent` and display the returned summary above `Було` / `Стало`. If Gemini fails, the notification still sends with the raw old/new schedules.

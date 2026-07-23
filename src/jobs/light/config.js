@@ -6,6 +6,9 @@ const DEFAULT_POE_URL = "https://www.poe.pl.ua/customs/dynamicgpv-info.php";
 const DEFAULT_POE_POST_URL = "https://www.poe.pl.ua/customs/search-disconnection.php";
 const DEFAULT_GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
 const DEFAULT_GEMINI_MODEL = "models/gemini-flash-lite-latest";
+const DEFAULT_LOKI_IP = "192.168.0.41";
+const DEFAULT_LOKI_PORT = 3100;
+const DEFAULT_LOKI_TIMEOUT_MS = 2000;
 const DEFAULT_POST_BODY = Object.freeze({
   varn: 0,
   filial: "8",
@@ -132,6 +135,25 @@ function readGeminiConfig(readers) {
   };
 }
 
+function readLokiConfig(readers) {
+  return {
+    enabled: true,
+    protocol: readers.readOptionalString("LOKI_PROTOCOL", "http"),
+    ip: readers.readOptionalString("LOKI_IP", DEFAULT_LOKI_IP),
+    port: readers.readNumber("LOKI_PORT", DEFAULT_LOKI_PORT, {
+      integer: true,
+      min: 1,
+      max: 65535
+    }),
+    appLabel: readers.readOptionalString("LOKI_APP_LABEL", "alerts-tg-bot"),
+    timeoutMs: readers.readNumber("LOKI_TIMEOUT_MS", DEFAULT_LOKI_TIMEOUT_MS, {
+      integer: true,
+      min: 1,
+      max: 60000
+    })
+  };
+}
+
 function loadLightConfig(_env, readers) {
   const useStub = readers.readBoolean("LIGHT_USE_STUB", false);
   const currentMinute =
@@ -229,7 +251,8 @@ function loadLightConfig(_env, readers) {
     gemini: readGeminiConfig(readers),
     log: {
       logFilePath: readers.readOptionalString("LOG_FILE_PATH", "alerts.log"),
-      retentionDays: readers.readNumber("LOG_RETENTION_DAYS", 7, { integer: true, min: 0 })
+      retentionDays: readers.readNumber("LOG_RETENTION_DAYS", 7, { integer: true, min: 0 }),
+      loki: readLokiConfig(readers)
     }
   };
 }
