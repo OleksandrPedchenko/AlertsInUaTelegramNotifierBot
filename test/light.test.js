@@ -9,6 +9,7 @@ const { createEnvReader } = require("../src/lib/config");
 const { runPluginJob } = require("../src/lib/runner");
 const { writeJobState } = require("../src/lib/stateStore");
 const { loadLightConfig } = require("../src/jobs/light/config");
+const { createDefaultState, createMockServer, renderPoeHtml } = require("../src/jobs/light/mockServer");
 const { parseLightSchedule } = require("../src/jobs/light/parser");
 const { encodePostBody, lightPlugin } = require("../src/jobs/light/plugin");
 const { createMemoryLogger, createSilentLogger, createTempDir, createTextResponse } = require("./helpers");
@@ -107,6 +108,86 @@ test("light config defaults Gemini to flash lite latest model", async () => {
 
   assert.equal(config.gemini.enabled, true);
   assert.equal(config.gemini.model, "models/gemini-flash-lite-latest");
+});
+
+test("light config allows localhost http mock URLs only", async () => {
+  const dir = await createTempDir();
+  const config = buildLightConfig(dir, {
+    LIGHT_POE_URL: "http://127.0.0.1:3010/customs/dynamicgpv-info.php",
+    LIGHT_POE_POST_URL: "http://localhost:3010/customs/search-disconnection.php"
+  });
+
+  assert.equal(config.poe.url, "http://127.0.0.1:3010/customs/dynamicgpv-info.php");
+  assert.equal(config.poe.postUrl, "http://localhost:3010/customs/search-disconnection.php");
+
+  assert.throws(
+    () =>
+      buildLightConfig(dir, {
+        LIGHT_POE_URL: "http://example.com/customs/dynamicgpv-info.php"
+      }),
+    /LIGHT_POE_URL must use https/
+  );
+});
+
+test("light mock server renders parser-compatible POE HTML", () => {
+  const state = createDefaultState();
+  state.updatedAt = "Mock updated 12:30";
+  state.days.today["5.1"] = Array.from({ length: 48 }, (_, index) =>
+    index < 2 ? 1 : index < 4 ? 2 : 3
+  );
+  state.days.tomorrow["5.1"] = Array.from({ length: 48 }, (_, index) => (index < 4 ? 2 : 1));
+
+  const schedule = parseLightSchedule(renderPoeHtml(state), 5, 1, {
+    now: new Date("2026-06-30T01:15:00")
+  });
+
+  assert.equal(schedule.updatedAt, "Mock updated 12:30");
+  assert.deepEqual(
+    schedule.today.timePeriods.map(({ status, time, current, durationMinutes }) => ({
+      status,
+      time,
+      current,
+      durationMinutes
+    })),
+    [
+      { status: 1, time: "00:00 - 01:00", current: false, durationMinutes: 60 },
+      { status: 2, time: "01:00 - 02:00", current: true, durationMinutes: 60 },
+      { status: 3, time: "02:00 - 24:00", current: false, durationMinutes: 1320 }
+    ]
+  );
+  assert.equal(schedule.tomorrow.timePeriods[0].status, 2);
+  assert.equal(schedule.tomorrow.timePeriods[0].durationMinutes, 120);
+});
+
+test("light mock server can override returned HTML from API", async () => {
+  const server = createMockServer();
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address();
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  try {
+    const customHtml = "<html><body><div class=\"gpvinfodetail\">custom mock</div></body></html>";
+    const saveResponse = await fetch(`${baseUrl}/api/html`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ html: customHtml })
+    });
+    const savePayload = await saveResponse.json();
+    assert.equal(savePayload.mode, "custom");
+    assert.equal(savePayload.html, customHtml);
+
+    const endpointResponse = await fetch(`${baseUrl}/customs/dynamicgpv-info.php`);
+    assert.equal(await endpointResponse.text(), customHtml);
+
+    const resetResponse = await fetch(`${baseUrl}/api/html`, { method: "DELETE" });
+    const resetPayload = await resetResponse.json();
+    assert.equal(resetPayload.mode, "generated");
+    assert.match(resetPayload.html, /turnoff-scheduleui-table/);
+  } finally {
+    await new Promise((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve()))
+    );
+  }
 });
 
 test("light parser preserves xbar row offset and segment grouping", () => {

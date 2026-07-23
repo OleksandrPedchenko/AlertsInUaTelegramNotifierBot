@@ -44,7 +44,14 @@ function readRequiredStringFromKeys(readers, keys) {
   return value;
 }
 
-function readHttpsUrl(readers, key, fallback) {
+function isLocalHttpUrl(parsed) {
+  return (
+    parsed.protocol === "http:" &&
+    ["localhost", "127.0.0.1", "[::1]"].includes(parsed.hostname)
+  );
+}
+
+function readPoeUrl(readers, key, fallback) {
   const value = readers.readOptionalString(key, fallback);
 
   let parsed;
@@ -54,8 +61,8 @@ function readHttpsUrl(readers, key, fallback) {
     throw new ConfigError(`${key} must be a valid URL`);
   }
 
-  if (parsed.protocol !== "https:") {
-    throw new ConfigError(`${key} must use https`);
+  if (parsed.protocol !== "https:" && !isLocalHttpUrl(parsed)) {
+    throw new ConfigError(`${key} must use https, except localhost mock URLs may use http`);
   }
 
   return parsed.toString();
@@ -148,8 +155,8 @@ function loadLightConfig(_env, readers) {
 
   return {
     poe: {
-      url: readHttpsUrl(readers, "LIGHT_POE_URL", DEFAULT_POE_URL),
-      postUrl: readHttpsUrl(readers, "LIGHT_POE_POST_URL", DEFAULT_POE_POST_URL),
+      url: readPoeUrl(readers, "LIGHT_POE_URL", DEFAULT_POE_URL),
+      postUrl: readPoeUrl(readers, "LIGHT_POE_POST_URL", DEFAULT_POE_POST_URL),
       postBody: readPostBody(readers),
       queue,
       subQueue,

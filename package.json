@@ -7,6 +7,7 @@
     "start": "node src/jobs/alerts/index.js",
     "start:alerts": "node src/jobs/alerts/index.js",
     "start:light": "node src/jobs/light/index.js",
+    "start:light:mock": "node src/jobs/light/mockServer.js",
     "test": "node --test"
   },
   "keywords": [

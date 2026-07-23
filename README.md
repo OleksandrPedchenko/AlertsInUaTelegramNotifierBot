@@ -25,6 +25,17 @@ One-shot Node.js job that fetches active air raid alert state for a region and t
    npm run start:light
    ```
 
+   Run the editable light mock server:
+   ```bash
+   npm run start:light:mock
+   ```
+
+   Open `http://127.0.0.1:3010/` to edit the schedule or the exact HTML returned by the mock. Point the worker at the mock with:
+   ```env
+   LIGHT_POE_URL=http://127.0.0.1:3010/customs/dynamicgpv-info.php
+   LIGHT_POE_POST_URL=http://127.0.0.1:3010/customs/search-disconnection.php
+   ```
+
 4. Run tests:
    ```bash
    npm test
@@ -64,6 +75,7 @@ One-shot Node.js job that fetches active air raid alert state for a region and t
 - `LIGHT_TG_CHAT_ID` (optional): Telegram chat/channel for light notifications. Falls back to `TG_CHAT_ID`.
 - `LIGHT_POE_URL` (optional): POE HTML schedule URL. Default `https://www.poe.pl.ua/customs/dynamicgpv-info.php`.
 - `LIGHT_POE_POST_URL` (optional): POE disconnection search URL. Default `https://www.poe.pl.ua/customs/search-disconnection.php`.
+- `LIGHT_MOCK_HOST` / `LIGHT_MOCK_PORT` (optional): host and port for `npm run start:light:mock`. Defaults to `127.0.0.1:3010`.
 - `LIGHT_POST_BODY_JSON` (optional): JSON body encoded as `disconn=...` for the POE POST request. Defaults to the same address payload from the xbar script.
 - `LIGHT_USE_STUB` (optional): if `true`, skips POE GET/POST requests and reads HTML from `LIGHT_STUB_FILE`. Default `false`.
 - `LIGHT_STUB_FILE` (optional): local HTML fixture for stub mode. Default `light-example.html`.
