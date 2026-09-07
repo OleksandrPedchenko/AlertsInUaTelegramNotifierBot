@@ -125,6 +125,7 @@ Example light job every minute:
 - In active endpoint mode (`ALERTS_USE_ACTIVE_ENDPOINT=true`), response is expected to be JSON with an `alerts` array. The worker emits `A` if at least one object matches:
   - `ALERTS_ACTIVE_MATCH_CRITERIA` (exact key/value matching).
   Otherwise it emits `N`.
+- The first matching alert’s `alert_level` is stored as `alertLevel` and displayed as `🟡 Жовтий рівень` or `🔴 Червоний рівень`. Level changes also trigger notifications. Missing or unsupported levels omit the level line. The active endpoint mock (`response.json`) includes both levels.
 - If both `ALERTS_USE_STUB=true` and `ALERTS_USE_ACTIVE_ENDPOINT=true`, stub data is loaded from `ALERTS_ACTIVE_STUB_FILE` instead of `ALERTS_STUB_RESPONSE`.
 - For active development without consuming API limits, set `ALERTS_USE_STUB=true`.
 - Notifications are sent via Telegram Bot API `sendMessage`.

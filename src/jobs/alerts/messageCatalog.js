@@ -46,7 +46,13 @@ class AlertMessageCatalog {
     };
 
     if (builder) {
-      return builder(safeContext);
+      const message = builder(safeContext);
+      const level = safeContext.alertLevel === "yellow"
+        ? "🟡 Жовтий рівень"
+        : safeContext.alertLevel === "red" ? "🔴 Червоний рівень" : null;
+      return level && (normalizedStatus === "A" || normalizedStatus === "P")
+        ? `${message}\n${this.asBold(level)}`
+        : message;
     }
 
     return this.asBold(
