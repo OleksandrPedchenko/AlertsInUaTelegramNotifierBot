@@ -2,9 +2,13 @@
   "name": "alerts-tg-bot",
   "version": "1.0.0",
   "description": "Cron-triggered air raid alerts fetcher with notifier hook",
-  "main": "src/index.js",
+  "main": "src/jobs/alerts/index.js",
   "scripts": {
-    "start": "node src/index.js"
+    "start": "node src/jobs/alerts/index.js",
+    "start:alerts": "node src/jobs/alerts/index.js",
+    "start:light": "node src/jobs/light/index.js",
+    "start:light:mock": "node src/jobs/light/mockServer.js",
+    "test": "node --test"
   },
   "keywords": [
     "cron",
@@ -17,6 +21,7 @@
     "node": ">=18.18.0"
   },
   "dependencies": {
-    "dotenv": "^17.3.1"
+    "dotenv": "^17.3.1",
+    "jsdom": "^22.1.0"
   }
 }

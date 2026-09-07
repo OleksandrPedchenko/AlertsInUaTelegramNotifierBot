@@ -5,3 +5,5 @@ node_modules/
 logs/
 .alerts-job.lock
 .alerts-last-state.json
+.light-job.lock
+.light-last-state.json

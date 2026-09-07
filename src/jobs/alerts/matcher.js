@@ -12,9 +12,7 @@ class AlertsMatcher {
   findByCriteria(criteria) {
     this.assertCriteriaObject(criteria);
 
-    return (
-      this.alerts.find((alert) => this.matchesCriteria(alert, criteria)) || null
-    );
+    return this.alerts.find((alert) => this.matchesCriteria(alert, criteria)) || null;
   }
 
   matchesCriteria(alert, criteria) {
