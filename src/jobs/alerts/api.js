@@ -36,7 +36,7 @@ function parseJsonBody(text) {
   }
 }
 
-function parseActiveAlertsState(responseText, matchCriteria) {
+function parseActiveAlerts(responseText, matchCriteria) {
   const payload = parseJsonBody(responseText);
   if (!payload || !Array.isArray(payload.alerts)) {
     throw new HttpRequestError("Unexpected active alerts API response. Expected JSON object with alerts array", {
@@ -61,12 +61,22 @@ function parseActiveAlertsState(responseText, matchCriteria) {
 
   const matcher = new AlertsMatcher(payload.alerts);
   const matchedAlert = matcher.findByCriteria(matchCriteria);
-  return matchedAlert ? "A" : "N";
+  return {
+    alertState: matchedAlert ? "A" : "N",
+    alertLevel: ["yellow", "red"].includes(matchedAlert?.alert_level)
+      ? matchedAlert.alert_level
+      : null
+  };
+}
+
+function parseActiveAlertsState(responseText, matchCriteria) {
+  return parseActiveAlerts(responseText, matchCriteria).alertState;
 }
 
 module.exports = {
   ALERT_STATES,
   buildAlertsUrl,
   parseAlertState,
-  parseActiveAlertsState
+  parseActiveAlertsState,
+  parseActiveAlerts
 };
