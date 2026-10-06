@@ -11,6 +11,7 @@ const { loadSubscriptions, runFanout } = require("./fanout");
 const { createDefaultState, createMockServer, renderPoeHtml } = require("./mockServer");
 const { parseLightSchedule } = require("./parser");
 const { lightPlugin } = require("./plugin");
+const scenarioSchedule = require("./scenarioSchedule.json");
 
 const CASES = Object.freeze({
   initial: { time: "12:00", description: "First schedule notification", seed: false },
@@ -45,23 +46,43 @@ function makeStates(caseName, keys) {
   const current = createDefaultState();
   const previous = createDefaultState();
   for (const state of [current, previous]) {
-    state.updatedAt = state === current ? "Оновлено: сценарій зараз" : "Оновлено: попередній графік";
+    state.updatedAt = `Демо: приклад POE від ${scenarioSchedule.capturedAt}`;
   }
 
   for (const key of keys) {
     for (const state of [current, previous]) {
-      state.days.today[key] = Array(48).fill(1);
-      state.days.tomorrow[key] = Array(48).fill(1);
+      state.days.today[key] = [...scenarioSchedule.days.today[key]];
+      state.days.tomorrow[key] = [...scenarioSchedule.days.tomorrow[key]];
     }
     const today = current.days.today[key];
     const tomorrow = current.days.tomorrow[key];
-    if (caseName === "schedule-change") today.fill(2, 40, 42);
-    if (caseName === "tomorrow-change") tomorrow.fill(2, 40, 42);
-    if (["off-reminder", "schedule-and-off"].includes(caseName)) today.fill(2, 34, 36);
-    if (["on-reminder", "tentative-on"].includes(caseName)) today.fill(2, 0, 36);
-    if (caseName === "tentative-on") today.fill(3, 36);
-    if (caseName === "midnight-off") tomorrow.fill(2);
-    if (caseName === "midnight-on") today.fill(2);
+    if (caseName === "schedule-change" || caseName === "tomorrow-change") {
+      const cells = caseName === "schedule-change" ? today : tomorrow;
+      const firstOutage = cells.findIndex((status, index) =>
+        status === 2 && index > 0 && cells[index - 1] === 1);
+      if (firstOutage < 0) throw new Error(`Scenario schedule ${key} has no outage to extend`);
+      cells[firstOutage - 1] = 2;
+    }
+    if (["off-reminder", "schedule-and-off"].includes(caseName)) {
+      today[33] = 1;
+      today.fill(2, 34, 36);
+      if (caseName === "schedule-and-off") {
+        previous.days.today[key].fill(1, 33, 36);
+      }
+    }
+    if (["on-reminder", "tentative-on"].includes(caseName)) {
+      today.fill(2, 34, 36);
+      today[36] = caseName === "tentative-on" ? 3 : 1;
+    }
+    if (caseName === "midnight-off") {
+      today[47] = 1;
+      tomorrow[0] = 2;
+      tomorrow[1] = 1;
+    }
+    if (caseName === "midnight-on") {
+      today[47] = 2;
+      tomorrow[0] = 1;
+    }
 
     if (["off-reminder", "on-reminder", "tentative-on", "midnight-off", "midnight-on"].includes(caseName)) {
       previous.days.today[key] = [...today];

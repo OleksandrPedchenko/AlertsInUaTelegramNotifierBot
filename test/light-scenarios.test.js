@@ -54,8 +54,8 @@ for (const [caseName, time, expected, geminiCalls] of [
   ["off-reminder", "16:50", /🔴 Відключення через/, 0],
   ["on-reminder", "17:50", /🟢 Світло з’явиться через/, 0],
   ["tentative-on", "17:50", /🟡 Світло може з’явитися через/, 0],
-  ["midnight-off", "23:50", /Завтра 00:00–24:00/, 0],
-  ["midnight-on", "23:50", /Завтра 00:00–24:00/, 0]
+  ["midnight-off", "23:50", /Завтра 00:00–00:30/, 0],
+  ["midnight-on", "23:50", /Завтра 00:00–04:00/, 0]
 ]) {
   test(`live scenario ${caseName} uses mock POE and sends expected Telegram message`, async () => {
     const actual = await execute(caseName, time);
@@ -63,6 +63,11 @@ for (const [caseName, time, expected, geminiCalls] of [
     assert.equal(actual.messages.length, 1);
     assert.equal(actual.messages[0].chat_id, "demo-chat");
     assert.match(actual.messages[0].text, expected);
+    if (caseName === "initial") {
+      assert.ok((actual.messages[0].text.match(/🔴/g) || []).length >= 2);
+      assert.match(actual.messages[0].text, /🟡/);
+      assert.match(actual.messages[0].text, /Завтра/);
+    }
     if (caseName === "tomorrow-appears") {
       assert.doesNotMatch(actual.messages[0].text, /Було|Стало|Що змінилось/);
     }
@@ -110,6 +115,10 @@ test("live tomorrow publication scenario sends to every subscribed chat", async 
   assert.deepEqual(messages.map(message => message.chat_id), ["chat-five", "chat-six"]);
   assert.match(messages[0].text, /на завтра · черга 5\.1/);
   assert.match(messages[1].text, /на завтра · черга 6\.1/);
+  assert.match(messages[0].text, /🔴/);
+  assert.match(messages[1].text, /🔴/);
+  assert.notEqual(messages[0].text.replace(/черга 5\.1/, "черга"),
+    messages[1].text.replace(/черга 6\.1/, "черга"));
   assert.ok(messages.every(message => !/Було|Стало|Що змінилось/.test(message.text)));
   await assert.rejects(runScenario({ caseName: "tomorrow-appears", queue: 5, env: {
     ...baseEnv, LIGHT_SUBSCRIPTIONS_FILE: subscriptionsFile
