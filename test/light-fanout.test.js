@@ -140,6 +140,7 @@ test("tomorrow-only changes get a separate tomorrow message", async () => {
     assert.match(prompts[0], /"day":"tomorrow"/);
     assert.match(prompts[0], /🔴[^\n]*продовжено/);
     assert.match(prompts[0], /🟡[^\n]*скорочено/);
+    assert.match(prompts[0], /пізніше: 🟢/);
     assert.match(prompts[0], /старий і новий час/);
 
     messages.length = 0;

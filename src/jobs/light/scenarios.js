@@ -16,6 +16,7 @@ const scenarioSchedule = require("./scenarioSchedule.json");
 const CASES = Object.freeze({
   initial: { time: "12:00", description: "First schedule notification", seed: false },
   "schedule-change": { time: "12:00", description: "Today's outage extends by 30 minutes, with a real Gemini summary", gemini: true },
+  "start-later": { time: "12:00", description: "Today's green period extends and the outage starts 30 minutes later", gemini: true },
   "tomorrow-appears": { time: "12:00", description: "Tomorrow schedule first published without a comparison" },
   "tomorrow-change": { time: "12:00", description: "Tomorrow's outage shortens by 30 minutes, with a real Gemini summary", gemini: true },
   "off-reminder": { time: "16:50", description: "Light off at 17:00" },
@@ -56,8 +57,8 @@ function makeStates(caseName, keys) {
     }
     const today = current.days.today[key];
     const tomorrow = current.days.tomorrow[key];
-    if (caseName === "schedule-change" || caseName === "tomorrow-change") {
-      const cells = caseName === "schedule-change" ? today : tomorrow;
+    if (["schedule-change", "start-later", "tomorrow-change"].includes(caseName)) {
+      const cells = caseName === "tomorrow-change" ? tomorrow : today;
       const firstOutage = cells.findIndex((status, index) =>
         status === 2 && index > 0 && cells[index - 1] === 1 &&
         (caseName === "schedule-change" || cells[index + 1] === 2));
@@ -67,6 +68,8 @@ function makeStates(caseName, keys) {
       if (caseName === "schedule-change") {
         cells[end] = 2;
         cells[end + 1] = 3;
+      } else if (caseName === "start-later") {
+        cells[firstOutage] = 1;
       } else {
         cells[end - 1] = 3;
         cells[end] = 1;

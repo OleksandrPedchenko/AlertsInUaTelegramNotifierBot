@@ -49,6 +49,7 @@ test("Gemini cases require an API key before sending", async () => {
 for (const [caseName, time, expected, geminiCalls] of [
   ["initial", "12:00", /⚡ Новий графік/, 0],
   ["schedule-change", "12:00", /Змінився графік відключень/, 1],
+  ["start-later", "12:00", /Змінився графік відключень/, 1],
   ["tomorrow-appears", "12:00", /З’явився графік на завтра/, 0],
   ["tomorrow-change", "12:00", /завтра/, 1],
   ["off-reminder", "16:50", /🔴 Відключення через/, 0],
@@ -73,6 +74,9 @@ for (const [caseName, time, expected, geminiCalls] of [
     }
     if (caseName === "schedule-change") {
       assert.match(actual.messages[0].text, /Було[^]*🔴 15:00–16:00[^]*Тепер[^]*🔴 15:00–16:30[^]*🟡 16:30–17:00/);
+    }
+    if (caseName === "start-later") {
+      assert.match(actual.messages[0].text, /Було[^]*🟢 00:00–15:00[^]*🔴 15:00–16:00[^]*Тепер[^]*🟢 00:00–15:30[^]*🔴 15:30–16:00/);
     }
     if (caseName === "tomorrow-change") {
       assert.match(actual.messages[0].text, /Було[^]*🔴 10:00–11:00[^]*Тепер[^]*🔴 10:00–10:30[^]*🟡 10:30–11:00/);
