@@ -382,6 +382,7 @@ test("light runner sends Telegram notification when selected queue schedule chan
   assert.match(telegramBody.text, /Стало/);
   assert.match(telegramBody.text, /Сьогодні/);
   assert.doesNotMatch(telegramBody.text, /Завтра/);
+  assert.doesNotMatch(telegramBody.text, /<blockquote expandable>/);
   assert.deepEqual(
     logger.entries.find((entry) => entry.message === "Gemini change summary skipped")?.meta,
     {
@@ -566,6 +567,7 @@ test("light runner asks Gemini to explain changed segments when configured", asy
   assert.match(telegramBody.text, /Світло вимикатимуть раніше/);
   assert.match(telegramBody.text, /Було/);
   assert.match(telegramBody.text, /Стало/);
+  assert.match(telegramBody.text, /Світло вимикатимуть раніше[^]*<blockquote expandable>[^]*Було[^]*Стало[^]*<\/blockquote>/);
   assert.equal(
     logger.entries.some(
       (entry) =>

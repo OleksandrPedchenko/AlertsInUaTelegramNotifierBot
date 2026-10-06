@@ -87,13 +87,14 @@ function buildLightNotification(currentState, previousState = null, options = {}
       lines.push(escapeHtml(options.changeSummary));
     }
 
-    lines.push("");
-    lines.push("<b>Було</b>");
-    lines.push(...buildScheduleDetails(previousState, { includeCurrent: false }));
-
-    lines.push("");
-    lines.push("<b>Стало</b>");
-    lines.push(...buildScheduleDetails(currentState));
+    const details = [
+      "<b>Було</b>",
+      ...buildScheduleDetails(previousState, { includeCurrent: false }),
+      "",
+      "<b>Стало</b>",
+      ...buildScheduleDetails(currentState)
+    ];
+    lines.push("", ...(options.changeSummary ? ["<blockquote expandable>", ...details, "</blockquote>"] : details));
   } else {
     lines.push("");
     lines.push(...buildScheduleDetails(currentState));
@@ -113,13 +114,16 @@ function buildDayLightNotification(currentState, previousDay, day, options = {})
   if (options.changeSummary) {
     lines.push("", "<b>Що змінилось</b>", escapeHtml(options.changeSummary));
   }
+  const details = [];
   if (previousDay) {
-    lines.push("", `<b>Було — ${dayLabel}</b>`);
-    lines.push(...formatPeriods(dayLabel, previousDay.timePeriods, { markCurrent: false }));
+    details.push(`<b>Було — ${dayLabel}</b>`);
+    details.push(...formatPeriods(dayLabel, previousDay.timePeriods, { markCurrent: false }));
+    details.push("");
   }
-  lines.push("", `<b>Стало — ${dayLabel}</b>`);
-  lines.push(...formatPeriods(dayLabel, currentDay.timePeriods, { markCurrent: day === "today" }));
-  lines.push(`Разом: +${prettyTime(currentDay.totalTimeOn)} -${prettyTime(currentDay.totalTimeOff)}`);
+  details.push(`<b>Стало — ${dayLabel}</b>`);
+  details.push(...formatPeriods(dayLabel, currentDay.timePeriods, { markCurrent: day === "today" }));
+  details.push(`Разом: +${prettyTime(currentDay.totalTimeOn)} -${prettyTime(currentDay.totalTimeOff)}`);
+  lines.push("", ...(options.changeSummary ? ["<blockquote expandable>", ...details, "</blockquote>"] : details));
   if (currentState.updatedAt) lines.push("", `Оновлено на сайті: ${escapeHtml(currentState.updatedAt)}`);
   lines.push("", `Джерело: ${escapeHtml(currentState.sourceUrl)}`);
   return lines.join("\n");

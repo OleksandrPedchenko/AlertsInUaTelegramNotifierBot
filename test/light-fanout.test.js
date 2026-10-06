@@ -131,6 +131,7 @@ test("tomorrow-only changes get a separate tomorrow message", async () => {
     await runFanout(env, { fetchImpl, logger: createSilentLogger() });
     assert.equal(messages.length, 1);
     assert.match(messages[0].text, /Завтра змінилось/);
+    assert.match(messages[0].text, /Завтра змінилось[^]*<blockquote expandable>[^]*Було[^]*Стало[^]*<\/blockquote>/);
     assert.doesNotMatch(messages[0].text, /<b>Сьогодні<\/b>/);
     assert.equal(prompts.length, 1);
     assert.match(prompts[0], /"day":"tomorrow"/);
