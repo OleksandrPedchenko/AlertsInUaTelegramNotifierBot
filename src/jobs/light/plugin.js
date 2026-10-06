@@ -94,6 +94,12 @@ function getCurrentMinute(date = new Date()) {
   return date.getHours() * 60 + date.getMinutes();
 }
 
+function getLocalDate(date = new Date()) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(
+    date.getDate()
+  ).padStart(2, "0")}`;
+}
+
 function dateFromCurrentMinute(currentMinute) {
   const date = new Date();
   date.setHours(Math.floor(currentMinute / 60), currentMinute % 60, 0, 0);
@@ -105,8 +111,14 @@ function getSentOutageReminderIds(previousState) {
   return Array.isArray(sentIds) ? sentIds.filter((id) => typeof id === "string") : [];
 }
 
-function buildOutageReminderId(outage) {
-  return `today:${outage.startMin}-${outage.endMin}`;
+function buildOutageReminderId(outage, date = getLocalDate()) {
+  return `${date}:${outage.kind || "off"}:${outage.startMin}-${outage.endMin}`;
+}
+
+function followingDate(date) {
+  const value = new Date(`${date}T00:00:00Z`);
+  value.setUTCDate(value.getUTCDate() + 1);
+  return value.toISOString().slice(0, 10);
 }
 
 function findPendingOutageReminder({ currentState, previousState, thresholdMinutes }) {
@@ -115,32 +127,37 @@ function findPendingOutageReminder({ currentState, previousState, thresholdMinut
   }
 
   const sentIds = new Set(getSentOutageReminderIds(previousState));
-  const upcomingOutage = currentState.today.timePeriods.find((period) => {
-    const state = period.state || period.status;
-    if (state !== 2 || !Number.isInteger(period.startMin) || !Number.isInteger(period.endMin)) {
-      return false;
+  const today = currentState.today.timePeriods;
+  const tomorrow = currentState.tomorrow?.timePeriods || [];
+  const scheduleDate = currentState.scheduleDate || getLocalDate();
+  for (const [day, periods, offset] of [["today", today, 0], ["tomorrow", tomorrow, 1440]]) {
+    for (const [index, period] of periods.entries()) {
+      const previousPeriod = index > 0 ? periods[index - 1] : day === "tomorrow" ? today.at(-1) : null;
+      const state = period.state || period.status;
+      const previousStatus = previousPeriod?.state || previousPeriod?.status;
+      const kind = state === 2 && previousStatus !== 2 ? "off" :
+        [1, 3].includes(state) && previousStatus === 2 ? "on" : null;
+      if (!kind || !Number.isInteger(period.startMin) || !Number.isInteger(period.endMin)) continue;
+      const minutesUntilStart = period.startMin + offset - currentState.currentMinute;
+      if (minutesUntilStart <= 0 || minutesUntilStart > thresholdMinutes) continue;
+      const id = buildOutageReminderId(
+        { ...period, kind },
+        day === "today" ? scheduleDate : followingDate(scheduleDate)
+      );
+      if (sentIds.has(id)) continue;
+      return {
+        id,
+        day,
+        kind,
+        tentative: state === 3,
+        startMin: period.startMin,
+        endMin: period.endMin,
+        time: period.time,
+        minutesUntilStart
+      };
     }
-
-    const minutesUntilStart = period.startMin - currentState.currentMinute;
-    return minutesUntilStart > 0 && minutesUntilStart <= thresholdMinutes;
-  });
-
-  if (!upcomingOutage) {
-    return null;
   }
-
-  const id = buildOutageReminderId(upcomingOutage);
-  if (sentIds.has(id)) {
-    return null;
-  }
-
-  return {
-    id,
-    startMin: upcomingOutage.startMin,
-    endMin: upcomingOutage.endMin,
-    time: upcomingOutage.time,
-    minutesUntilStart: upcomingOutage.startMin - currentState.currentMinute
-  };
+  return null;
 }
 
 function markOutageReminderSent(currentState) {
@@ -208,6 +225,7 @@ const lightPlugin = {
       sourceUrl: config.poe.url,
       source: config.job.useStub ? "stub" : "poe",
       currentMinute,
+      scheduleDate: getLocalDate(),
       responseStatus: response.getStatus,
       postResponseStatus: response.postStatus,
       outageReminders: {

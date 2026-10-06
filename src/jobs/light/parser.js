@@ -140,6 +140,13 @@ function parseLightSchedule(html, queue, subQueue, options = {}) {
   const todayParser = new Parser(response.todayTable, queue, subQueue, options);
   const tomorrowParser = new Parser(response.tomorrowTable, queue, subQueue, options);
 
+  const hasSchedule = Array.from(todayParser.elements).some((cell) =>
+    [...cell.classList].some((name) => /^light_[123]$/.test(name))
+  );
+  if (!hasSchedule) {
+    throw new Error(`POE schedule row ${queue}.${subQueue} is missing or invalid`);
+  }
+
   return {
     queue,
     subQueue,

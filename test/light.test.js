@@ -11,7 +11,7 @@ const { writeJobState } = require("../src/lib/stateStore");
 const { loadLightConfig } = require("../src/jobs/light/config");
 const { createDefaultState, createMockServer, renderPoeHtml } = require("../src/jobs/light/mockServer");
 const { parseLightSchedule } = require("../src/jobs/light/parser");
-const { encodePostBody, lightPlugin } = require("../src/jobs/light/plugin");
+const { encodePostBody, findPendingOutageReminder, lightPlugin } = require("../src/jobs/light/plugin");
 const { createMemoryLogger, createSilentLogger, createTempDir, createTextResponse } = require("./helpers");
 
 function row(statuses) {
@@ -232,6 +232,41 @@ test("light post body keeps xbar disconn encoding", () => {
   );
 });
 
+test("light parser rejects HTML without the selected schedule row", () => {
+  assert.throws(
+    () => parseLightSchedule("<html><body>Service unavailable</body></html>", 2, 2),
+    /schedule/i
+  );
+});
+
+test("light reminders include turn-on transitions and reset on a new day", () => {
+  const periods = [
+    { state: 1, startMin: 0, endMin: 60, time: "00:00 - 01:00" },
+    { state: 2, startMin: 60, endMin: 90, time: "01:00 - 01:30" },
+    { state: 1, startMin: 90, endMin: 120, time: "01:30 - 02:00" }
+  ];
+  const state = { today: { timePeriods: periods }, currentMinute: 85, scheduleDate: "2026-10-07" };
+  const previousState = { outageReminders: { sentIds: ["2026-10-06:off:60-90"] } };
+  const reminder = findPendingOutageReminder({ currentState: state, previousState, thresholdMinutes: 10 });
+  assert.equal(reminder.kind, "on");
+  assert.equal(reminder.minutesUntilStart, 5);
+  assert.equal(reminder.id, "2026-10-07:on:90-120");
+  assert.match(findPendingOutageReminder({ currentState: { ...state, currentMinute: 55 }, previousState, thresholdMinutes: 10 }).id, /^2026-10-07:off:/);
+});
+
+test("light reminders include tomorrow's midnight transition", () => {
+  const currentState = {
+    scheduleDate: "2026-10-06", currentMinute: 1435,
+    today: { timePeriods: [{ state: 2, startMin: 1410, endMin: 1440, time: "23:30 - 24:00" }] },
+    tomorrow: { timePeriods: [{ state: 1, startMin: 0, endMin: 60, time: "00:00 - 01:00" }] }
+  };
+  const reminder = findPendingOutageReminder({ currentState, previousState: null, thresholdMinutes: 10 });
+  assert.equal(reminder.kind, "on");
+  assert.equal(reminder.day, "tomorrow");
+  assert.equal(reminder.minutesUntilStart, 5);
+  assert.equal(reminder.id, "2026-10-07:on:0-60");
+});
+
 test("light runner skips notification when selected queue fingerprint is unchanged", async () => {
   const dir = await createTempDir();
   const html = createPoeHtml();
@@ -363,6 +398,28 @@ test("light runner sends Telegram notification when selected queue schedule chan
       subQueue: 2
     }
   );
+});
+
+test("light runner retries an unsent schedule change on the next run", async () => {
+  const dir = await createTempDir();
+  const oldHtml = createPoeHtml([1, 1, 2, 3]);
+  const newHtml = createPoeHtml([2, 2, 1, 1]);
+  const config = buildLightConfig(dir, { LIGHT_TG_HTTP_MAX_RETRIES: "0" });
+  const previousState = parseLightSchedule(oldHtml, 2, 2);
+  await writeJobState(config.job.stateFilePath, lightPlugin.getStateKey(config), previousState, lightPlugin.getStateFingerprint(previousState));
+  await assert.rejects(runPluginJob(lightPlugin, {}, {
+    config, logger: createSilentLogger(),
+    fetchImpl: async (url, options) => String(url).includes("api.telegram.org")
+      ? createTextResponse(500, JSON.stringify({ ok: false }))
+      : createLightFetch(newHtml)(url, options)
+  }));
+  let sent = 0;
+  const retry = await runPluginJob(lightPlugin, {}, {
+    config, logger: createSilentLogger(),
+    fetchImpl: createLightFetch(newHtml, () => { sent += 1; })
+  });
+  assert.equal(retry.changed, true);
+  assert.equal(sent, 1);
 });
 
 test("light runner sends schedule change and outage reminder as separate messages", async () => {

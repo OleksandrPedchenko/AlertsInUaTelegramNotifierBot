@@ -17,9 +17,17 @@ function formatPeriod(period, markCurrent = true) {
 }
 
 function formatOutageReminder(reminder) {
+  const when = reminder.day === "tomorrow" ? "Завтра з" : "З";
+  if (reminder.kind === "on") {
+    return [
+      `<b>Нагадування про появу світла</b>`,
+      `${when} ${escapeHtml(reminder.time)} світло ${reminder.tentative ? "може зʼявитися" : "має зʼявитися"}.`,
+      `Початок через ${escapeHtml(reminder.minutesUntilStart)} хв.`
+    ];
+  }
   return [
     `<b>Нагадування про відключення</b>`,
-    `З ${escapeHtml(reminder.time)} буде відключення світла.`,
+    `${when} ${escapeHtml(reminder.time)} буде відключення світла.`,
     `Початок через ${escapeHtml(reminder.minutesUntilStart)} хв.`
   ];
 }

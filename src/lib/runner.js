@@ -129,10 +129,6 @@ async function runPluginJob(plugin, env = process.env, options = {}) {
     const currentFingerprint = plugin.getStateFingerprint(currentState);
     const changed = previousFingerprint !== currentFingerprint;
 
-    await writeJobState(stateFilePath, stateKey, currentState, currentFingerprint, {
-      jobName: plugin.name
-    });
-
     const shouldNotify =
       typeof plugin.shouldNotify === "function"
         ? plugin.shouldNotify({
@@ -147,6 +143,9 @@ async function runPluginJob(plugin, env = process.env, options = {}) {
         : changed;
 
     if (!shouldNotify) {
+      await writeJobState(stateFilePath, stateKey, currentState, currentFingerprint, {
+        jobName: plugin.name
+      });
       logger.info("State unchanged; notification skipped", {
         jobName: plugin.name,
         stateKey,
@@ -173,6 +172,9 @@ async function runPluginJob(plugin, env = process.env, options = {}) {
     const notifications = normalizeNotifications(notificationOutput);
 
     if (notifications.length === 0) {
+      await writeJobState(stateFilePath, stateKey, currentState, currentFingerprint, {
+        jobName: plugin.name
+      });
       logger.info("Notification text is empty; notification skipped", {
         jobName: plugin.name,
         stateKey
@@ -190,32 +192,23 @@ async function runPluginJob(plugin, env = process.env, options = {}) {
         fetchImpl: options.fetchImpl,
         logger
       });
-    }
-
-    if (typeof plugin.afterNotificationSuccess === "function") {
-      const updatedState = await plugin.afterNotificationSuccess({
-        previousState,
-        previousRecord,
-        currentState,
-        currentFingerprint,
-        previousFingerprint,
-        changed,
-        config,
-        deps,
-        notifications
+      const updatedState = typeof plugin.afterNotificationSuccess === "function"
+        ? await plugin.afterNotificationSuccess({
+            previousState,
+            previousRecord,
+            currentState,
+            currentFingerprint,
+            previousFingerprint,
+            changed,
+            config,
+            deps,
+            notifications: [notification]
+          })
+        : null;
+      const stateToSave = updatedState || currentState;
+      await writeJobState(stateFilePath, stateKey, stateToSave, plugin.getStateFingerprint(stateToSave), {
+        jobName: plugin.name
       });
-
-      if (updatedState) {
-        await writeJobState(
-          stateFilePath,
-          stateKey,
-          updatedState,
-          plugin.getStateFingerprint(updatedState),
-          {
-            jobName: plugin.name
-          }
-        );
-      }
     }
 
     logger.info("Notification step completed", {

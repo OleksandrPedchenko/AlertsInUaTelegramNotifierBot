@@ -78,14 +78,14 @@ One-shot Node.js job that fetches active air raid alert state for a region and t
 - `LIGHT_QUEUE` (optional): queue number, `1..6`. Falls back to xbar-style `VAR_QUEUE`, then `5`.
 - `LIGHT_SUB_QUEUE` (optional): subqueue number, `1..2`. Falls back to xbar-style `VAR_SUB_QUEUE`, then `1`.
 - `LIGHT_TG_CHAT_ID` (optional): Telegram chat/channel for light notifications. Falls back to `TG_CHAT_ID`.
-- `LIGHT_POE_URL` (optional): POE HTML schedule URL. Default `https://www.poe.pl.ua/customs/dynamicgpv-info.php`.
-- `LIGHT_POE_POST_URL` (optional): POE disconnection search URL. Default `https://www.poe.pl.ua/customs/search-disconnection.php`.
+- `LIGHT_POE_URL` (optional): POE HTML schedule URL. Default `https://www.poe.pl.ua/customs/dynamicgpv-info.php`. Plain HTTP is accepted only for localhost mock URLs.
+- `LIGHT_POE_POST_URL` (optional): POE disconnection search URL. Default `https://www.poe.pl.ua/customs/search-disconnection.php`. Plain HTTP is accepted only for localhost mock URLs.
 - `LIGHT_MOCK_HOST` / `LIGHT_MOCK_PORT` (optional): host and port for `npm run start:light:mock`. Defaults to `127.0.0.1:3010`.
 - `LIGHT_POST_BODY_JSON` (optional): JSON body encoded as `disconn=...` for the POE POST request. Defaults to the same address payload from the xbar script.
 - `LIGHT_USE_STUB` (optional): if `true`, skips POE GET/POST requests and reads HTML from `LIGHT_STUB_FILE`. Default `false`.
 - `LIGHT_STUB_FILE` (optional): local HTML fixture for stub mode. Default `light-example.html`.
 - `GEMINI_API_KEY` or `LIGHT_GEMINI_API_KEY` (optional): Gemini API key used to summarize what changed between old and new light segments.
-- `LIGHT_GEMINI_ENABLED` (optional): enables Gemini summaries. If unset, Gemini is enabled automatically when an API key is present. Default in `.env.example` is `false` to avoid accidental API usage.
+- `LIGHT_GEMINI_ENABLED` (optional): enables Gemini summaries. If unset, Gemini is enabled automatically when an API key is present. Set it to `false` to disable summaries.
 - `LIGHT_GEMINI_MODEL` (optional): Gemini model ID. Default `models/gemini-flash-lite-latest`.
 - `LIGHT_GEMINI_API_BASE_URL` (optional): default `https://generativelanguage.googleapis.com/v1beta`.
 - `LIGHT_GEMINI_TIMEOUT_MS`, `LIGHT_GEMINI_MAX_RETRIES`, `LIGHT_GEMINI_RETRY_BASE_DELAY_MS` (optional): Gemini request retry settings.
@@ -95,7 +95,11 @@ One-shot Node.js job that fetches active air raid alert state for a region and t
 - `LIGHT_LOCK_FILE_PATH` (optional): default `.light-job.lock`.
 - `LIGHT_STATE_FILE_PATH` (optional): default `.light-last-state.json`.
 - `LIGHT_ALWAYS_SEND_TG_MESSAGE` (optional): if `true`, sends a Telegram message on every run. Default `false`.
-- `LIGHT_OUTAGE_REMINDER_BEFORE_MINUTES` (optional): sends a one-time reminder when today’s next outage starts in `N` minutes or less. Default `0` disables reminders.
+- `LIGHT_OUTAGE_REMINDER_BEFORE_MINUTES` (optional): sends one reminder before each turn-off and turn-on transition when it starts in `N` minutes or less. Default `0` disables reminders. Reminder IDs include the date so the same time can notify again tomorrow.
+
+### Local POE mock
+
+`npm run start:light:mock` serves a horizontally scrolling 48-cell schedule builder for today and tomorrow, queues `1–6`, and subqueues `1–2`. Builder edits save automatically. The raw editor can replace exactly the HTML returned by `GET /customs/dynamicgpv-info.php`; “Load generated” copies the current builder output into the editor, and “Use schedule builder” switches the endpoint back to generated HTML. `POST /customs/search-disconnection.php` returns a successful mock response. Changes take effect without restarting the server.
 
 ## Cron Setup (Every N Minutes)
 
@@ -139,4 +143,4 @@ Example light job every minute:
 - The light job fetches both POE endpoints from the xbar script, parses today/tomorrow tables, and sends a Telegram message only when the selected queue/subqueue schedule fingerprint changes.
 - For light job development without touching POE, set `LIGHT_USE_STUB=true`; by default it parses `light-example.html` from the project root.
 - When Gemini is enabled, changed light notifications send normalized previous/current segments to Gemini using `models/{model}:generateContent` and display the returned summary above `Було` / `Стало`. If Gemini fails, the notification still sends with the raw old/new schedules.
-- The light job can also send a separate one-time outage reminder with `LIGHT_OUTAGE_REMINDER_BEFORE_MINUTES`, for example when an outage starts within the next 10 minutes. Sent reminders are persisted in `LIGHT_STATE_FILE_PATH` so cron does not repeat them every run.
+- The light job also sends one reminder before each turn-off and turn-on transition when `LIGHT_OUTAGE_REMINDER_BEFORE_MINUTES` is set. Sent reminders are persisted in `LIGHT_STATE_FILE_PATH` and keyed by date so they can recur on later days.
