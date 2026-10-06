@@ -349,7 +349,9 @@ const lightPlugin = {
     if (!previousState || (changedDays.length === 0 && config.job.alwaysSendTgMessage)) {
       notifications.push({
         type: "schedule-change",
-        text: buildLightNotification(currentState)
+        text: buildLightNotification(currentState, null, {
+          collapseSchedule: Boolean(previousState)
+        })
       });
     } else {
       for (const day of changedDays) {

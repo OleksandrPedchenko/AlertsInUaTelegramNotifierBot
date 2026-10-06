@@ -134,7 +134,7 @@ test("tomorrow-only changes get a separate tomorrow message", async () => {
     await runFanout(env, { fetchImpl, logger: createSilentLogger() });
     assert.equal(messages.length, 1);
     assert.match(messages[0].text, /Завтра змінилось/);
-    assert.match(messages[0].text, /Завтра змінилось[^]*<blockquote expandable>[^]*Було[^]*Стало[^]*<\/blockquote>/);
+    assert.match(messages[0].text, /Завтра змінилось[^]*<blockquote expandable>[^]*Було[^]*Тепер[^]*<\/blockquote>/);
     assert.doesNotMatch(messages[0].text, /<b>Сьогодні<\/b>/);
     assert.equal(prompts.length, 1);
     assert.match(prompts[0], /"day":"tomorrow"/);
@@ -202,7 +202,7 @@ test("fan-out skips Gemini when tomorrow first appears but uses it for a later r
   await runLightJob(config, { fetchImpl, logger: createSilentLogger() });
   assert.equal(geminiCalls, 0);
   assert.equal(messages.length, 1);
-  assert.match(messages[0], /черга — завтра/);
+  assert.match(messages[0], /З’явився графік на завтра · черга/);
   assert.doesNotMatch(messages[0], /Було|Стало|Що змінилось/);
 
   messages.length = 0;
@@ -212,7 +212,7 @@ test("fan-out skips Gemini when tomorrow first appears but uses it for a later r
   assert.equal(geminiCalls, 1);
   assert.equal(messages.length, 1);
   assert.match(messages[0], /Зміна завтра/);
-  assert.match(messages[0], /Було[^]*Стало/);
+  assert.match(messages[0], /Було[^]*Тепер/);
 });
 
 test("subscriptions reject duplicate destination and invalid queue", async () => {
@@ -374,9 +374,9 @@ test("fan-out sends off and on reminders once for their respective chats", async
   try {
     await runFanout(env, { fetchImpl, logger: createSilentLogger() });
     assert.equal(messages.length, 4);
-    assert.match(messages[1].text, /Нагадування про відключення/);
+    assert.match(messages[1].text, /🔴 Відключення через/);
     assert.equal(messages[1].chat_id, "off-chat");
-    assert.match(messages[3].text, /Нагадування про появу світла/);
+    assert.match(messages[3].text, /🟢 Світло з’явиться через/);
     assert.equal(messages[3].chat_id, "on-chat");
     messages.length = 0;
     await runFanout(env, { fetchImpl, logger: createSilentLogger() });

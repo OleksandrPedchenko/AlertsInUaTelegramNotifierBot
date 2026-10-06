@@ -1,7 +1,5 @@
 "use strict";
 
-const { prettyTime } = require("./parser");
-
 function escapeHtml(value) {
   return String(value)
     .replace(/&/g, "&amp;")
@@ -10,98 +8,85 @@ function escapeHtml(value) {
 }
 
 function formatPeriod(period, markCurrent = true) {
-  const currentMarker = period.current && markCurrent ? " ✅" : "";
-  return `${escapeHtml(period.time)}${currentMarker} (${prettyTime(period.durationMinutes)}) — ${escapeHtml(
+  const emoji = { 1: "🟢", 2: "🔴", 3: "🟡" }[period.status || period.state] || "⚪";
+  const currentMarker = period.current && markCurrent ? " ← зараз" : "";
+  return `${emoji} ${escapeHtml(String(period.time).replace(" - ", "–"))} · ${escapeHtml(
     period.statusLabel
-  )}`;
+  )}${currentMarker}`;
 }
 
 function formatOutageReminder(reminder) {
-  const when = reminder.day === "tomorrow" ? "Завтра з" : "З";
+  const time = `${reminder.day === "tomorrow" ? "Завтра " : ""}${escapeHtml(
+    String(reminder.time).replace(" - ", "–")
+  )}`;
+  const lead = escapeHtml(reminder.minutesUntilStart);
   if (reminder.kind === "on") {
     return [
-      `<b>Нагадування про появу світла</b>`,
-      `${when} ${escapeHtml(reminder.time)} світло ${reminder.tentative ? "може зʼявитися" : "має зʼявитися"}.`,
-      `Початок через ${escapeHtml(reminder.minutesUntilStart)} хв.`
+      `${reminder.tentative ? "🟡 Світло може з’явитися" : "🟢 Світло з’явиться"} через ${lead} хв`,
+      time
     ];
   }
   return [
-    `<b>Нагадування про відключення</b>`,
-    `${when} ${escapeHtml(reminder.time)} буде відключення світла.`,
-    `Початок через ${escapeHtml(reminder.minutesUntilStart)} хв.`
+    `🔴 Відключення через ${lead} хв`,
+    time
   ];
 }
 
 function formatPeriods(title, periods, options = {}) {
   if (!periods.length) {
-    return [`<b>${escapeHtml(title)}</b>`, "No data..."];
+    return [...(title ? [`<b>${escapeHtml(title)}</b>`] : []), "Немає даних"];
   }
 
   return [
-    `<b>${escapeHtml(title)}</b>`,
+    ...(title ? [`<b>${escapeHtml(title)}</b>`] : []),
     ...periods.map((period) => formatPeriod(period, options.markCurrent !== false))
   ];
 }
 
 function buildScheduleDetails(state, options = {}) {
-  const lines = [];
-  const currentPeriod = state.today.timePeriods.find((period) => period.current);
-
-  if (currentPeriod && options.includeCurrent !== false) {
-    lines.push(`Зараз: ${formatPeriod(currentPeriod, false)}`);
-    lines.push("");
-  }
-
-  lines.push(...formatPeriods("Сьогодні", state.today.timePeriods));
-  lines.push(
-    `Разом: +${prettyTime(state.today.totalTimeOn)} -${prettyTime(state.today.totalTimeOff)}`
-  );
+  const lines = [...formatPeriods("Сьогодні", state.today.timePeriods, options)];
 
   if (state.tomorrow.timePeriods.length) {
     lines.push("");
     lines.push(...formatPeriods("Завтра", state.tomorrow.timePeriods, { markCurrent: false }));
-    lines.push(
-      `Разом завтра: +${prettyTime(state.tomorrow.totalTimeOn)} -${prettyTime(
-        state.tomorrow.totalTimeOff
-      )}`
-    );
-  }
-
-  if (state.updatedAt) {
-    lines.push("");
-    lines.push(`Оновлено на сайті: ${escapeHtml(state.updatedAt)}`);
   }
 
   return lines;
 }
 
+function formatUpdatedAt(state) {
+  return state.updatedAt ? ["", `🕒 ${escapeHtml(state.updatedAt)}`] : [];
+}
+
+function expandableQuote(lines) {
+  return ["<blockquote expandable>", ...lines, "</blockquote>"];
+}
+
 function buildLightNotification(currentState, previousState = null, options = {}) {
   const lines = [
-    `<b>Графік світла: ${escapeHtml(currentState.queue)}.${escapeHtml(currentState.subQueue)} черга</b>`
+    `<b>${previousState ? "🔄 Змінився" : options.collapseSchedule ? "⚡ Актуальний" : "⚡ Новий"} графік · черга ${escapeHtml(currentState.queue)}.${escapeHtml(currentState.subQueue)}</b>`
   ];
 
   if (previousState) {
     if (options.changeSummary) {
-      lines.push("");
-      lines.push("<b>Що змінилось</b>");
-      lines.push(escapeHtml(options.changeSummary));
+      lines.push("", escapeHtml(options.changeSummary));
     }
 
     const details = [
       "<b>Було</b>",
-      ...buildScheduleDetails(previousState, { includeCurrent: false }),
+      ...buildScheduleDetails(previousState, { markCurrent: false }),
       "",
-      "<b>Стало</b>",
+      "<b>Тепер</b>",
       ...buildScheduleDetails(currentState)
     ];
-    lines.push("", ...(options.changeSummary ? ["<blockquote expandable>", ...details, "</blockquote>"] : details));
+    lines.push("", ...expandableQuote(details));
   } else {
     lines.push("");
-    lines.push(...buildScheduleDetails(currentState));
+    const details = buildScheduleDetails(currentState);
+    lines.push(...(options.collapseSchedule ? expandableQuote(details) : details));
   }
 
-  lines.push("");
-  lines.push(`Джерело: ${escapeHtml(currentState.sourceUrl)}`);
+  lines.push(...formatUpdatedAt(currentState));
   return lines.join("\n");
 }
 
@@ -109,33 +94,31 @@ function buildDayLightNotification(currentState, previousDay, day, options = {})
   const dayLabel = day === "tomorrow" ? "Завтра" : "Сьогодні";
   const currentDay = currentState[day];
   const lines = [
-    `<b>Графік світла: ${escapeHtml(currentState.queue)}.${escapeHtml(currentState.subQueue)} черга — ${dayLabel.toLowerCase()}</b>`
+    `<b>${previousDay ? "🔄 Змінився графік" : "📅 З’явився графік"} на ${dayLabel.toLowerCase()} · черга ${escapeHtml(currentState.queue)}.${escapeHtml(currentState.subQueue)}</b>`
   ];
   if (options.changeSummary) {
-    lines.push("", "<b>Що змінилось</b>", escapeHtml(options.changeSummary));
+    lines.push("", escapeHtml(options.changeSummary));
   }
   const details = [];
   if (previousDay) {
-    details.push(`<b>Було — ${dayLabel}</b>`);
-    details.push(...formatPeriods(dayLabel, previousDay.timePeriods, { markCurrent: false }));
+    details.push("<b>Було</b>");
+    details.push(...formatPeriods("", previousDay.timePeriods, { markCurrent: false }));
     details.push("");
+    details.push("<b>Тепер</b>");
   }
-  if (previousDay) details.push(`<b>Стало — ${dayLabel}</b>`);
-  details.push(...formatPeriods(dayLabel, currentDay.timePeriods, { markCurrent: day === "today" }));
-  details.push(`Разом: +${prettyTime(currentDay.totalTimeOn)} -${prettyTime(currentDay.totalTimeOff)}`);
-  lines.push("", ...(options.changeSummary ? ["<blockquote expandable>", ...details, "</blockquote>"] : details));
-  if (currentState.updatedAt) lines.push("", `Оновлено на сайті: ${escapeHtml(currentState.updatedAt)}`);
-  lines.push("", `Джерело: ${escapeHtml(currentState.sourceUrl)}`);
+  details.push(...formatPeriods(previousDay ? "" : dayLabel, currentDay.timePeriods, { markCurrent: day === "today" }));
+  lines.push("", ...(previousDay ? expandableQuote(details) : details));
+  lines.push(...formatUpdatedAt(currentState));
   return lines.join("\n");
 }
 
 function buildOutageReminderNotification(currentState, reminder) {
+  const [headline, time] = formatOutageReminder(reminder);
   return [
-    `<b>Графік світла: ${escapeHtml(currentState.queue)}.${escapeHtml(currentState.subQueue)} черга</b>`,
+    `<b>${headline} · черга ${escapeHtml(currentState.queue)}.${escapeHtml(currentState.subQueue)}</b>`,
+    time,
     "",
-    ...formatOutageReminder(reminder),
-    "",
-    `Джерело: ${escapeHtml(currentState.sourceUrl)}`
+    ...expandableQuote(buildScheduleDetails(currentState))
   ].join("\n");
 }
 

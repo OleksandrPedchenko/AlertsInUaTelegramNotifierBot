@@ -330,9 +330,9 @@ test("light runner sends upcoming outage reminder only once", async () => {
   assert.equal(firstResult.changed, false);
   assert.equal(firstResult.notified, true);
   assert.equal(telegramMessages.length, 1);
-  assert.match(telegramMessages[0], /Нагадування про відключення/);
-  assert.match(telegramMessages[0], /З 01:00 - 01:30 буде відключення світла/);
-  assert.match(telegramMessages[0], /Початок через 5 хв/);
+  assert.match(telegramMessages[0], /🔴 Відключення через 5 хв/);
+  assert.match(telegramMessages[0], /01:00–01:30/);
+  assert.match(telegramMessages[0], /<blockquote expandable>/);
 
   const secondResult = await runPluginJob(lightPlugin, {}, {
     config,
@@ -378,12 +378,11 @@ test("light runner sends Telegram notification when selected queue schedule chan
   assert.equal(result.changed, true);
   assert.equal(result.notified, true);
   assert.equal(telegramBody.chat_id, "tg-chat");
-  assert.match(telegramBody.text, /Графік світла: 2\.2 черга/);
+  assert.match(telegramBody.text, /Змінився графік на сьогодні · черга 2\.2/);
   assert.match(telegramBody.text, /Було/);
-  assert.match(telegramBody.text, /Стало/);
-  assert.match(telegramBody.text, /Сьогодні/);
+  assert.match(telegramBody.text, /Тепер/);
   assert.doesNotMatch(telegramBody.text, /Завтра/);
-  assert.doesNotMatch(telegramBody.text, /<blockquote expandable>/);
+  assert.match(telegramBody.text, /<blockquote expandable>/);
   assert.deepEqual(
     logger.entries.find((entry) => entry.message === "Gemini change summary skipped")?.meta,
     {
@@ -487,11 +486,11 @@ test("light runner sends schedule change and outage reminder as separate message
   assert.equal(result.notified, true);
   assert.equal(telegramMessages.length, 2);
   assert.match(telegramMessages[0], /Було/);
-  assert.match(telegramMessages[0], /Стало/);
-  assert.doesNotMatch(telegramMessages[0], /Нагадування про відключення/);
-  assert.match(telegramMessages[1], /Нагадування про відключення/);
+  assert.match(telegramMessages[0], /Тепер/);
+  assert.doesNotMatch(telegramMessages[0], /🔴 Відключення через/);
+  assert.match(telegramMessages[1], /🔴 Відключення через/);
   assert.doesNotMatch(telegramMessages[1], /Було/);
-  assert.doesNotMatch(telegramMessages[1], /Стало/);
+  assert.doesNotMatch(telegramMessages[1], /Тепер/);
 });
 
 test("light runner asks Gemini to explain changed segments when configured", async () => {
@@ -564,11 +563,10 @@ test("light runner asks Gemini to explain changed segments when configured", asy
   assert.match(geminiBody.contents[0].parts[0].text, /Не використовуй слово 'перемикання' у відповіді/);
   assert.match(geminiBody.contents[0].parts[0].text, /Для висновку орієнтуйся насамперед на OLD_OUTAGES і NEW_OUTAGES/);
   assert.doesNotMatch(geminiBody.contents[0].parts[0].text, /statusLabel/);
-  assert.match(telegramBody.text, /Що змінилось/);
   assert.match(telegramBody.text, /Світло вимикатимуть раніше/);
   assert.match(telegramBody.text, /Було/);
-  assert.match(telegramBody.text, /Стало/);
-  assert.match(telegramBody.text, /Світло вимикатимуть раніше[^]*<blockquote expandable>[^]*Було[^]*Стало[^]*<\/blockquote>/);
+  assert.match(telegramBody.text, /Тепер/);
+  assert.match(telegramBody.text, /Світло вимикатимуть раніше[^]*<blockquote expandable>[^]*Було[^]*Тепер[^]*<\/blockquote>/);
   assert.equal(
     logger.entries.some(
       (entry) =>
@@ -619,8 +617,8 @@ test("first publication of tomorrow sends its schedule without a Gemini comparis
 
   assert.equal(geminiCalls, 0);
   assert.equal(messages.length, 1);
-  assert.match(messages[0], /черга — завтра/);
-  assert.match(messages[0], /00:00 - 01:00/);
+  assert.match(messages[0], /З’явився графік на завтра · черга/);
+  assert.match(messages[0], /00:00–01:00/);
   assert.doesNotMatch(messages[0], /Було|Стало|Що змінилось|blockquote/);
 });
 
@@ -654,5 +652,5 @@ test("light stub mode reads local html and skips POE requests", async () => {
   assert.equal(result.notified, true);
   assert.equal(poeCalls, 0);
   assert.equal(telegramBody.chat_id, "tg-chat");
-  assert.match(telegramBody.text, /Графік світла: 2\.2 черга/);
+  assert.match(telegramBody.text, /Новий графік · черга 2\.2/);
 });
