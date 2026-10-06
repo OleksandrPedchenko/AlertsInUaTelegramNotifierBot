@@ -7,6 +7,7 @@ const { createEnvReader } = require("../../lib/config");
 const { createFallbackLogger, runPluginJob } = require("../../lib/runner");
 const { writeJobState } = require("../../lib/stateStore");
 const { loadLightConfig } = require("./config");
+const { loadSubscriptions, runFanout } = require("./fanout");
 const { createDefaultState, createMockServer, renderPoeHtml } = require("./mockServer");
 const { parseLightSchedule } = require("./parser");
 const { lightPlugin } = require("./plugin");
@@ -40,47 +41,59 @@ function parseChoice(value, name, min, max) {
   return number;
 }
 
-function makeStates(caseName, key) {
+function makeStates(caseName, keys) {
   const current = createDefaultState();
   const previous = createDefaultState();
   for (const state of [current, previous]) {
-    state.days.today[key] = Array(48).fill(1);
-    state.days.tomorrow[key] = Array(48).fill(1);
     state.updatedAt = state === current ? "Оновлено: сценарій зараз" : "Оновлено: попередній графік";
   }
 
-  const today = current.days.today[key];
-  const tomorrow = current.days.tomorrow[key];
-  if (caseName === "schedule-change") today.fill(2, 40, 42);
-  if (caseName === "tomorrow-change") tomorrow.fill(2, 40, 42);
-  if (["off-reminder", "schedule-and-off"].includes(caseName)) today.fill(2, 34, 36);
-  if (["on-reminder", "tentative-on"].includes(caseName)) today.fill(2, 0, 36);
-  if (caseName === "tentative-on") today.fill(3, 36);
-  if (caseName === "midnight-off") tomorrow.fill(2);
-  if (caseName === "midnight-on") today.fill(2);
+  for (const key of keys) {
+    for (const state of [current, previous]) {
+      state.days.today[key] = Array(48).fill(1);
+      state.days.tomorrow[key] = Array(48).fill(1);
+    }
+    const today = current.days.today[key];
+    const tomorrow = current.days.tomorrow[key];
+    if (caseName === "schedule-change") today.fill(2, 40, 42);
+    if (caseName === "tomorrow-change") tomorrow.fill(2, 40, 42);
+    if (["off-reminder", "schedule-and-off"].includes(caseName)) today.fill(2, 34, 36);
+    if (["on-reminder", "tentative-on"].includes(caseName)) today.fill(2, 0, 36);
+    if (caseName === "tentative-on") today.fill(3, 36);
+    if (caseName === "midnight-off") tomorrow.fill(2);
+    if (caseName === "midnight-on") today.fill(2);
 
-  if (["off-reminder", "on-reminder", "tentative-on", "midnight-off", "midnight-on"].includes(caseName)) {
-    previous.days.today[key] = [...today];
-    previous.days.tomorrow[key] = [...tomorrow];
+    if (["off-reminder", "on-reminder", "tentative-on", "midnight-off", "midnight-on"].includes(caseName)) {
+      previous.days.today[key] = [...today];
+      previous.days.tomorrow[key] = [...tomorrow];
+    }
   }
   return { current, previous };
 }
 
-async function runScenario({ caseName, time, queue = 5, subQueue = 1, leadMinutes = 10, env = process.env, fetchImpl, logger } = {}) {
+async function runScenario({ caseName, time, queue, subQueue, leadMinutes = 10, env = process.env, fetchImpl, logger } = {}) {
   const scenario = CASES[caseName];
   if (!scenario) throw new Error(`Unknown case: ${caseName}. Run --list to see available cases.`);
   const currentMinute = parseClockTime(time || scenario.time);
-  const selectedQueue = parseChoice(queue, "queue", 1, 6);
-  const selectedSubQueue = parseChoice(subQueue, "subqueue", 1, 2);
+  const selectedQueue = parseChoice(queue ?? 5, "queue", 1, 6);
+  const selectedSubQueue = parseChoice(subQueue ?? 1, "subqueue", 1, 2);
   const selectedLead = parseChoice(leadMinutes, "lead", 1, 1440);
   if (scenario.gemini && !(env.LIGHT_GEMINI_API_KEY || env.GEMINI_API_KEY)) {
     throw new Error(`${caseName} requires LIGHT_GEMINI_API_KEY or GEMINI_API_KEY`);
   }
 
   const key = `${selectedQueue}.${selectedSubQueue}`;
+  const subscriptionsFile = env.LIGHT_SUBSCRIPTIONS_FILE
+    ? path.resolve(env.LIGHT_SUBSCRIPTIONS_FILE) : null;
+  const subscriptions = subscriptionsFile ? await loadSubscriptions(subscriptionsFile) : null;
+  if (subscriptions && (queue !== undefined || subQueue !== undefined)) {
+    throw new Error("--queue and --subqueue apply only when LIGHT_SUBSCRIPTIONS_FILE is unset");
+  }
+  const keys = subscriptions
+    ? [...new Set(subscriptions.map(({ queue, subQueue }) => `${queue}.${subQueue}`))] : [key];
   const enableGemini = scenario.gemini || (caseName === "tomorrow-appears" &&
     Boolean(env.LIGHT_GEMINI_API_KEY || env.GEMINI_API_KEY));
-  const { current, previous } = makeStates(caseName, key);
+  const { current, previous } = makeStates(caseName, keys);
   const server = createMockServer(current);
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "light-scenario-"));
   try {
@@ -91,7 +104,7 @@ async function runScenario({ caseName, time, queue = 5, subQueue = 1, leadMinute
     const baseUrl = `http://127.0.0.1:${server.address().port}`;
     const scenarioEnv = {
       ...env,
-      LIGHT_SUBSCRIPTIONS_FILE: "",
+      LIGHT_SUBSCRIPTIONS_FILE: subscriptionsFile || "",
       LIGHT_QUEUE: String(selectedQueue),
       LIGHT_SUB_QUEUE: String(selectedSubQueue),
       LIGHT_POE_URL: `${baseUrl}/customs/dynamicgpv-info.php`,
@@ -105,19 +118,30 @@ async function runScenario({ caseName, time, queue = 5, subQueue = 1, leadMinute
     };
     const config = loadLightConfig(scenarioEnv, createEnvReader(scenarioEnv, { cwd: tempDir }));
     if (scenario.seed !== false) {
-      const previousState = parseLightSchedule(renderPoeHtml(previous), selectedQueue, selectedSubQueue);
-      if (caseName === "tomorrow-appears") {
-        previousState.tomorrow = { timePeriods: [], totalTimeOn: 0, totalTimeOff: 0 };
+      const destinations = subscriptions || [{ queue: selectedQueue, subQueue: selectedSubQueue }];
+      const previousHtml = renderPoeHtml(previous);
+      for (const destination of destinations) {
+        const previousState = parseLightSchedule(previousHtml, destination.queue, destination.subQueue);
+        if (caseName === "tomorrow-appears") {
+          previousState.tomorrow = { timePeriods: [], totalTimeOn: 0, totalTimeOff: 0 };
+        }
+        const stateKey = subscriptions
+          ? `light:${destination.queue}.${destination.subQueue}:chat:${destination.chatId}`
+          : lightPlugin.getStateKey(config);
+        await writeJobState(config.job.stateFilePath, stateKey, previousState,
+          lightPlugin.getStateFingerprint(previousState));
       }
-      await writeJobState(config.job.stateFilePath, lightPlugin.getStateKey(config), previousState,
-        lightPlugin.getStateFingerprint(previousState));
     }
-    const result = await runPluginJob(lightPlugin, scenarioEnv, {
+    const options = {
       config,
       logger: logger || createFallbackLogger(),
       fetchImpl
-    });
-    return { ...result, caseName, time: time || scenario.time, queue: selectedQueue, subQueue: selectedSubQueue };
+    };
+    const result = subscriptions
+      ? await runFanout(scenarioEnv, options)
+      : await runPluginJob(lightPlugin, scenarioEnv, options);
+    return { ...result, notified: subscriptions ? result.notificationCount > 0 : result.notified,
+      caseName, time: time || scenario.time, queue: selectedQueue, subQueue: selectedSubQueue };
   } finally {
     if (server.listening) await new Promise((resolve) => server.close(resolve));
     await fs.rm(tempDir, { recursive: true, force: true });
@@ -162,7 +186,11 @@ async function main() {
     async flush() {}
   };
   const result = await runScenario({ ...options, logger });
-  console.log(`Case ${result.caseName} at ${result.time}, queue ${result.queue}.${result.subQueue}: ${result.notified ? "Telegram message sent" : "no message"}`);
+  if (result.subscriptions) {
+    console.log(`Case ${result.caseName} at ${result.time}: ${result.notificationCount} Telegram messages sent to ${result.subscriptions} subscriptions`);
+  } else {
+    console.log(`Case ${result.caseName} at ${result.time}, queue ${result.queue}.${result.subQueue}: ${result.notified ? "Telegram message sent" : "no message"}`);
+  }
 }
 
 if (require.main === module) {

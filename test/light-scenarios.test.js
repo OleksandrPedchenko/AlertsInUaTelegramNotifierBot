@@ -1,9 +1,11 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const fs = require("node:fs/promises");
+const path = require("node:path");
 const test = require("node:test");
 const { runScenario, parseClockTime } = require("../src/jobs/light/scenarios");
-const { createTextResponse } = require("./helpers");
+const { createTempDir, createTextResponse } = require("./helpers");
 
 const baseEnv = {
   TG_BOT_TOKEN: "test-token",
@@ -74,4 +76,77 @@ test("schedule change and imminent outage send two separate messages", async () 
   assert.match(actual.messages[0].text, /Змінився графік відключень/);
   assert.match(actual.messages[1].text, /Нагадування про відключення/);
   assert.equal(actual.geminiCalls, 1);
+});
+
+test("live tomorrow publication scenario sends to every subscribed chat", async () => {
+  const dir = await createTempDir();
+  const subscriptionsFile = path.join(dir, "subscriptions.json");
+  await fs.writeFile(subscriptionsFile, JSON.stringify({ subscriptions: [
+    { queue: 5, subQueue: 1, chatId: "chat-five" },
+    { queue: 6, subQueue: 1, chatId: "chat-six" }
+  ] }));
+  const messages = [];
+  let poeGets = 0;
+  let geminiCalls = 0;
+  const fetchImpl = (url, options) => {
+    if (String(url).includes("api.telegram.org")) {
+      messages.push(JSON.parse(options.body));
+      return Promise.resolve(createTextResponse(200, JSON.stringify({ ok: true })));
+    }
+    if (String(url).includes("generativelanguage.googleapis.com")) {
+      geminiCalls += 1;
+      return Promise.resolve(createTextResponse(200, JSON.stringify({ ok: true })));
+    }
+    poeGets += 1;
+    return fetch(url, options);
+  };
+  const result = await runScenario({ caseName: "tomorrow-appears", env: {
+    ...baseEnv, LIGHT_SUBSCRIPTIONS_FILE: subscriptionsFile
+  }, fetchImpl });
+  assert.equal(result.notified, true);
+  assert.equal(result.notificationCount, 2);
+  assert.equal(poeGets, 1);
+  assert.equal(geminiCalls, 0);
+  assert.deepEqual(messages.map(message => message.chat_id), ["chat-five", "chat-six"]);
+  assert.match(messages[0].text, /5\.1 черга — завтра/);
+  assert.match(messages[1].text, /6\.1 черга — завтра/);
+  assert.ok(messages.every(message => !/Було|Стало|Що змінилось/.test(message.text)));
+  await assert.rejects(runScenario({ caseName: "tomorrow-appears", queue: 5, env: {
+    ...baseEnv, LIGHT_SUBSCRIPTIONS_FILE: subscriptionsFile
+  }, fetchImpl }), /--queue and --subqueue apply only/);
+});
+
+test("live revision scenario batches subscribed queues in one Gemini request", async () => {
+  const dir = await createTempDir();
+  const subscriptionsFile = path.join(dir, "subscriptions.json");
+  await fs.writeFile(subscriptionsFile, JSON.stringify({ subscriptions: [
+    { queue: 5, subQueue: 1, chatId: "chat-five" },
+    { queue: 6, subQueue: 1, chatId: "chat-six" }
+  ] }));
+  const messages = [];
+  let poeGets = 0;
+  let geminiCalls = 0;
+  const fetchImpl = (url, options) => {
+    if (String(url).includes("api.telegram.org")) {
+      messages.push(JSON.parse(options.body));
+      return Promise.resolve(createTextResponse(200, JSON.stringify({ ok: true })));
+    }
+    if (String(url).includes("generativelanguage.googleapis.com")) {
+      geminiCalls += 1;
+      return Promise.resolve(createTextResponse(200, JSON.stringify({ candidates: [{ content: { parts: [{
+        text: JSON.stringify({ "5.1:tomorrow": "Зміна для 5.1", "6.1:tomorrow": "Зміна для 6.1" })
+      }] } }] })));
+    }
+    poeGets += 1;
+    return fetch(url, options);
+  };
+  const result = await runScenario({ caseName: "tomorrow-change", env: {
+    ...baseEnv, LIGHT_SUBSCRIPTIONS_FILE: subscriptionsFile
+  }, fetchImpl });
+  assert.equal(result.notificationCount, 2);
+  assert.equal(poeGets, 1);
+  assert.equal(geminiCalls, 1);
+  assert.deepEqual(messages.map(message => message.chat_id), ["chat-five", "chat-six"]);
+  assert.match(messages[0].text, /Зміна для 5\.1/);
+  assert.match(messages[1].text, /Зміна для 6\.1/);
 });

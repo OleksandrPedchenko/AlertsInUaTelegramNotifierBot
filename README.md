@@ -114,7 +114,7 @@ The batch makes no immediate retry after a Gemini error; `LIGHT_GEMINI_MAX_RETRI
 
 ### Live light notification scenarios
 
-Set `TG_BOT_TOKEN` and `LIGHT_TG_CHAT_ID` in `.env` to your **demo bot and group**. For schedule revision cases, also set `GEMINI_API_KEY` or `LIGHT_GEMINI_API_KEY`. These commands send real Telegram messages; revision cases make real Gemini requests, while `tomorrow-appears` skips Gemini even when a key is configured:
+Set `TG_BOT_TOKEN` in `.env`. If `LIGHT_SUBSCRIPTIONS_FILE` is configured, each case sends real Telegram messages to every subscribed chat using its assigned queue; otherwise set `LIGHT_TG_CHAT_ID` for a single demo group. For schedule revision cases, also set `GEMINI_API_KEY` or `LIGHT_GEMINI_API_KEY`. Revision cases make real Gemini requests, while `tomorrow-appears` skips Gemini even when a key is configured:
 
 ```sh
 npm run test:light:live -- --list
@@ -130,7 +130,7 @@ npm run test:light:live -- --case midnight-on --time 23:50
 npm run test:light:live -- --case schedule-and-off --time 16:50
 ```
 
-`--time HH:MM` sets the worker's current local clock time for the run. Each case has a default time shown by `--list`; `--lead N` changes the reminder window from the default 10 minutes. `--queue 1..6` and `--subqueue 1..2` select the queue shown in the message (defaults `5.1`). A reminder sends only if its transition falls after the selected time and within the lead window. `schedule-and-off` sends two messages. Each command starts a temporary local POE mock server, fetches its GET endpoint, and uses isolated state, so it does not change the mock builder at `127.0.0.1:3010` or the worker's saved state. The temporary mock URL in the message stops working when the command ends.
+`--time HH:MM` sets the worker's current local clock time for the run. Each case has a default time shown by `--list`; `--lead N` changes the reminder window from the default 10 minutes. Without subscriptions, `--queue 1..6` and `--subqueue 1..2` select the queue shown in the message (defaults `5.1`). With subscriptions, each configured queue is used and these two flags are unavailable. A reminder sends only if its transition falls after the selected time and within the lead window. `schedule-and-off` sends two messages per subscription. Each command starts a temporary local POE mock server, fetches its GET endpoint once, and uses isolated state, so it does not change the mock builder at `127.0.0.1:3010` or the worker's saved state. The temporary mock URL in the message stops working when the command ends.
 
 To fetch the **real POE schedule** and emulate the current local time, use:
 
