@@ -142,6 +142,7 @@ test("tomorrow-only changes get a separate tomorrow message", async () => {
     assert.match(prompts[0], /🟡[^\n]*скорочено/);
     assert.match(prompts[0], /початок відключення не змінюється/);
     assert.match(prompts[0], /старий і новий час/);
+    assert.match(prompts[0], /кожне змінене відключення окремим рядком/);
 
     messages.length = 0;
     state.days.today["1.1"].fill(2, 36, 38);

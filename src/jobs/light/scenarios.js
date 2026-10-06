@@ -19,6 +19,7 @@ const CASES = Object.freeze({
   "today-shorter": { time: "12:00", description: "Today's outage ends 30 minutes earlier without moving its start", gemini: true },
   "tomorrow-appears": { time: "12:00", description: "Tomorrow schedule first published without a comparison" },
   "tomorrow-change": { time: "12:00", description: "Tomorrow's outage shortens by 30 minutes, with a real Gemini summary", gemini: true },
+  "double-change": { time: "12:00", description: "Two tomorrow outages change: one shortens and one extends", gemini: true },
   "off-reminder": { time: "20:50", description: "Queue 5.1 light off at its fixed 21:00 start" },
   "tentative-on": { time: "15:50", description: "Queue 5.1 tentative return begins at 16:00" },
   "midnight-off": { time: "23:50", queue: 2, subQueue: 1, description: "Queue 2.1 light off tomorrow at 00:00" },
@@ -56,6 +57,19 @@ function makeStates(caseName, keys) {
     }
     const today = current.days.today[key];
     const tomorrow = current.days.tomorrow[key];
+    if (caseName === "double-change") {
+      const outages = tomorrow.flatMap((status, start) => {
+        if (status !== 2 || (start > 0 && tomorrow[start - 1] === 2)) return [];
+        const end = tomorrow.indexOf(3, start);
+        return end - start >= 2 && tomorrow[end + 1] === 1 ? [{ start, end }] : [];
+      });
+      if (outages.length < 2) throw new Error(`Scenario schedule ${key} needs two outages`);
+      const [shorter, longer] = outages;
+      tomorrow[shorter.end - 1] = 3;
+      tomorrow[shorter.end] = 1;
+      tomorrow[longer.end] = 2;
+      tomorrow[longer.end + 1] = 3;
+    }
     if (["schedule-change", "today-shorter", "tomorrow-change", "schedule-and-off"].includes(caseName)) {
       const cells = ["tomorrow-change", "schedule-and-off"].includes(caseName) ? tomorrow : today;
       const firstOutage = cells.findIndex((status, index) =>

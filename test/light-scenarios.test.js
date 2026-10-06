@@ -76,6 +76,7 @@ for (const [caseName, time, expected, geminiCalls] of [
   ["today-shorter", "12:00", /Змінився графік відключень/, 1],
   ["tomorrow-appears", "12:00", /З’явився графік на завтра/, 0],
   ["tomorrow-change", "12:00", /завтра/, 1],
+  ["double-change", "12:00", /завтра/, 1],
   ["off-reminder", "20:50", /🔴 Відключення через/, 0],
   ["tentative-on", "15:50", /🟡 Світло може з’явитися через/, 0],
   ["midnight-off", "23:50", /Завтра 00:00–01:00/, 0],
@@ -103,6 +104,9 @@ for (const [caseName, time, expected, geminiCalls] of [
     }
     if (caseName === "tomorrow-change") {
       assert.match(actual.messages[0].text, /Було[^]*🔴 10:00–11:00[^]*Тепер[^]*🔴 10:00–10:30[^]*🟡 10:30–11:00/);
+    }
+    if (caseName === "double-change") {
+      assert.match(actual.messages[0].text, /Було[^]*🔴 10:00–11:00[^]*🔴 16:00–17:30[^]*Тепер[^]*🔴 10:00–10:30[^]*🔴 16:00–18:00[^]*🟡 18:00–18:30/);
     }
     if (caseName === "off-reminder" || caseName === "tentative-on") {
       assert.doesNotMatch(actual.messages[0].text, /🔴 17:00–18:00/);
