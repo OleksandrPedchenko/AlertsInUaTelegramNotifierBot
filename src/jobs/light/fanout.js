@@ -11,6 +11,7 @@ const { readJobState, writeJobState } = require("../../lib/stateStore");
 const { sendTelegramMessage } = require("../../lib/telegramNotifier");
 const { loadLightConfig } = require("./config");
 const { buildGeminiUrl, extractGeminiText, normalizePeriodForPrompt } = require("./geminiClient");
+const { effectiveDay } = require("./effectiveSchedule");
 const { parseLightSchedule } = require("./parser");
 const { buildCurrentLightState, dateFromCurrentMinute, dayFingerprint, fetchPoeData, getChangedDays, getCurrentMinute, lightPlugin, previousScheduleForDay, readStubData } = require("./plugin");
 
@@ -80,6 +81,7 @@ function changeCacheKey(item) {
 }
 
 function batchPrompt(items) {
+  const treatYellowAsGreen = items[0]?.currentState.treatYellowAsGreen;
   const changes = items.map(item => ({
     id: item.batchId,
     day: item.day,
@@ -89,16 +91,26 @@ function batchPrompt(items) {
   }));
   return [
     "Поясни українською зміни графіка світла окремо для кожного id.",
-    "Стани: 1=світло є, 2=немає, 3=невизначений час повернення світла одразу після червоного відключення.",
+    treatYellowAsGreen
+      ? "Стани: 1=світло є (включно з жовтим періодом POE), 2=немає."
+      : "Стани: 1=світло є, 2=немає, 3=невизначений час повернення світла одразу після червоного відключення.",
     "Найчастіша зміна — червоний період став довшим або коротшим. Порівнюй початок і кінець старого та нового відключення; називай старий і новий час.",
     "Для продовження: 🔴 Відключення продовжено до HH:MM (було до HH:MM).",
-    "Для скорочення, якщо після червоного йде стан 3: 🟡 Відключення скорочено до HH:MM (було до HH:MM). Світло може з’явитися раніше.",
-    "Для скорочення, якщо новий стан 1: 🟢 Відключення скорочено до HH:MM (було до HH:MM).",
-    "У звичайному шестигодинному циклі початок відключення не змінюється: змінюється лише кінець червоного періоду, за ним іде 30 хвилин невизначеного повернення світла, потім зелений період.",
+    treatYellowAsGreen
+      ? "Для скорочення: 🟢 Відключення скорочено до HH:MM (було до HH:MM). Світло є з нового часу кінця."
+      : "Для скорочення, якщо після червоного йде стан 3: 🟡 Відключення скорочено до HH:MM (було до HH:MM). Світло може з’явитися раніше.",
+    ...(!treatYellowAsGreen
+      ? ["Для скорочення, якщо новий стан 1: 🟢 Відключення скорочено до HH:MM (було до HH:MM)."]
+      : []),
+    treatYellowAsGreen
+      ? "У звичайному шестигодинному циклі початок відключення не змінюється: змінюється лише кінець червоного періоду, після якого світло вважається наявним."
+      : "У звичайному шестигодинному циклі початок відключення не змінюється: змінюється лише кінець червоного періоду, за ним іде 30 хвилин невизначеного повернення світла, потім зелений період.",
     "Якщо дані все ж показують нове чи скасоване відключення, опиши фактичну зміну без вигаданої причини.",
     "Один короткий рядок на кожну суттєву зміну. Не дублюй зміну сусіднього зеленого чи невизначеного періоду окремим рядком.",
     "Якщо змінилися два або більше відключень, опиши кожне змінене відключення окремим рядком у часовому порядку.",
-    "Не обіцяй, що світло точно буде у стані 3. Не вигадуй причини, поради чи зміни, яких немає.",
+    treatYellowAsGreen
+      ? "Жовтий період POE тут свідомо вважається часом зі світлом. Не вигадуй причини, поради чи зміни, яких немає."
+      : "Не обіцяй, що світло точно буде у стані 3. Не вигадуй причини, поради чи зміни, яких немає.",
     "Для сьогодні ігноруй зміни, що повністю минули до currentMinute; для завтра аналізуй всю добу.",
     "Відповідь: лише JSON object, де ключ — точний id, значення — короткий текст про зміни без заголовка.",
     JSON.stringify(changes)
@@ -144,7 +156,9 @@ async function prepareGeminiSummaries(items, config, deps) {
     for (const day of getChangedDays(item.previousState, item.currentState)) {
       const previousDay = previousScheduleForDay(item.previousState, item.currentState, day);
       if (!previousDay?.timePeriods?.length) continue;
-      const change = { ...item, day, previousDay, currentDay: item.currentState[day] };
+      const change = { ...item, day,
+        previousDay: effectiveDay(previousDay, item.currentState.treatYellowAsGreen),
+        currentDay: effectiveDay(item.currentState[day], item.currentState.treatYellowAsGreen) };
       const key = changeCacheKey(change);
       item.changeCacheKeys[day] = key;
       change.changeCacheKey = key;

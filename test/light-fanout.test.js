@@ -102,6 +102,7 @@ test("tomorrow-only changes get a separate tomorrow message", async () => {
   const base = `http://127.0.0.1:${server.address().port}`;
   const env = {
     TG_BOT_TOKEN: "test-token", GEMINI_API_KEY: "test-gemini", LIGHT_SUBSCRIPTIONS_FILE: file,
+    LIGHT_TREAT_YELLOW_AS_GREEN: "false",
     LIGHT_POE_URL: `${base}/customs/dynamicgpv-info.php`,
     LIGHT_STATE_FILE_PATH: path.join(dir, "state.json"),
     LIGHT_LOCK_FILE_PATH: path.join(dir, "light.lock"),

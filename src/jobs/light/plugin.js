@@ -4,6 +4,7 @@ const { readFile } = require("fs/promises");
 const { HttpRequestError } = require("../../lib/httpClient");
 const { loadLightConfig } = require("./config");
 const { describeLightScheduleChange } = require("./geminiClient");
+const { effectiveDay, effectiveSchedule } = require("./effectiveSchedule");
 const { buildDayLightNotification, buildLightNotification, buildOutageReminderNotification } = require("./messageCatalog");
 const { parseLightSchedule } = require("./parser");
 
@@ -44,6 +45,7 @@ async function readStubData(config) {
 }
 
 function normalizeScheduleForFingerprint(schedule) {
+  schedule = effectiveSchedule(schedule, schedule.treatYellowAsGreen);
   return {
     queue: schedule.queue,
     subQueue: schedule.subQueue,
@@ -113,8 +115,8 @@ function hasPublishedSchedule(day) {
 function getChangedDays(previousState, currentState) {
   if (!previousState) return [];
   return ["today", "tomorrow"].filter(day =>
-    dayFingerprint(previousScheduleForDay(previousState, currentState, day)) !==
-    dayFingerprint(currentState[day])
+    dayFingerprint(effectiveDay(previousScheduleForDay(previousState, currentState, day), currentState.treatYellowAsGreen)) !==
+    dayFingerprint(effectiveDay(currentState[day], currentState.treatYellowAsGreen))
   );
 }
 
@@ -124,8 +126,9 @@ function findPendingOutageReminder({ currentState, previousState, thresholdMinut
   }
 
   const sentIds = new Set(getSentOutageReminderIds(previousState));
-  const today = currentState.today.timePeriods;
-  const tomorrow = currentState.tomorrow?.timePeriods || [];
+  const visibleSchedule = effectiveSchedule(currentState, currentState.treatYellowAsGreen);
+  const today = visibleSchedule.today.timePeriods;
+  const tomorrow = visibleSchedule.tomorrow?.timePeriods || [];
   const scheduleDate = currentState.scheduleDate || getLocalDate();
   for (const [day, periods, offset] of [["today", today, 0], ["tomorrow", tomorrow, 1440]]) {
     for (const [index, period] of periods.entries()) {
@@ -181,6 +184,7 @@ function buildCurrentLightState(schedule, config, previousState, response) {
     ...schedule,
     sourceUrl: config.poe.url,
     source: config.job.useStub ? "stub" : "poe",
+    treatYellowAsGreen: config.job.treatYellowAsGreen,
     currentMinute,
     scheduleDate: getLocalDate(),
     responseStatus: response.getStatus,
@@ -260,6 +264,7 @@ const lightPlugin = {
   },
 
   async buildNotification({ previousState, currentState, changed, config, deps }) {
+    const visibleState = effectiveSchedule(currentState, currentState.treatYellowAsGreen);
     const changedDays = getChangedDays(previousState, currentState);
     const revisedDays = changedDays.filter(day =>
       hasPublishedSchedule(previousScheduleForDay(previousState, currentState, day))
@@ -315,8 +320,8 @@ const lightPlugin = {
         };
         summaries[firstDay] = await describeLightScheduleChange(
           config.gemini,
-          priorForPrompt,
-          currentState,
+          effectiveSchedule(priorForPrompt, currentState.treatYellowAsGreen),
+          visibleState,
           deps
         );
 
@@ -349,7 +354,7 @@ const lightPlugin = {
     if (!previousState || (changedDays.length === 0 && config.job.alwaysSendTgMessage)) {
       notifications.push({
         type: "schedule-change",
-        text: buildLightNotification(currentState, null, {
+        text: buildLightNotification(visibleState, null, {
           collapseSchedule: Boolean(previousState)
         })
       });
@@ -359,8 +364,9 @@ const lightPlugin = {
         notifications.push({
           type: `schedule-change:${day}`,
           text: buildDayLightNotification(
-            currentState,
-            hasPublishedSchedule(previousDay) ? previousDay : null,
+            visibleState,
+            hasPublishedSchedule(previousDay)
+              ? effectiveDay(previousDay, currentState.treatYellowAsGreen) : null,
             day,
             { changeSummary: summaries[day] }
           )
@@ -371,7 +377,7 @@ const lightPlugin = {
     if (currentState.pendingOutageReminder) {
       notifications.push({
         type: "outage-reminder",
-        text: buildOutageReminderNotification(currentState, currentState.pendingOutageReminder)
+        text: buildOutageReminderNotification(visibleState, currentState.pendingOutageReminder)
       });
     }
 

@@ -11,10 +11,11 @@ const { createTempDir, createTextResponse } = require("./helpers");
 const baseEnv = {
   TG_BOT_TOKEN: "test-token",
   LIGHT_TG_CHAT_ID: "demo-chat",
+  LIGHT_TREAT_YELLOW_AS_GREEN: "false",
   GEMINI_API_KEY: "test-gemini-key"
 };
 
-async function execute(caseName, time) {
+async function execute(caseName, time, overrides = {}) {
   const messages = [];
   let geminiCalls = 0;
   const fetchImpl = (url, options) => {
@@ -30,9 +31,18 @@ async function execute(caseName, time) {
     }
     return fetch(url, options);
   };
-  const result = await runScenario({ caseName, time, env: baseEnv, fetchImpl });
+  const result = await runScenario({ caseName, time, env: { ...baseEnv, ...overrides }, fetchImpl });
   return { result, messages, geminiCalls };
 }
+
+test("live scenarios default to green treatment of yellow when enabled", async () => {
+  const initial = await execute("initial", "12:00", { LIGHT_TREAT_YELLOW_AS_GREEN: "true" });
+  assert.equal(initial.messages.length, 1);
+  assert.doesNotMatch(initial.messages[0].text, /🟡/);
+  assert.match(initial.messages[0].text, /🟢 16:00–21:00 · світло є/);
+  const reminder = await execute("tentative-on", "15:50", { LIGHT_TREAT_YELLOW_AS_GREEN: "true" });
+  assert.match(reminder.messages[0].text, /🟢 Світло з’явиться через 10 хв/);
+});
 
 test("time override validates HH:MM", () => {
   assert.equal(parseClockTime("16:50"), 1010);
@@ -177,6 +187,7 @@ test("live revision scenario batches subscribed queues in one Gemini request", a
   const messages = [];
   let poeGets = 0;
   let geminiCalls = 0;
+  let geminiPrompt = "";
   const fetchImpl = (url, options) => {
     if (String(url).includes("api.telegram.org")) {
       messages.push(JSON.parse(options.body));
@@ -184,6 +195,7 @@ test("live revision scenario batches subscribed queues in one Gemini request", a
     }
     if (String(url).includes("generativelanguage.googleapis.com")) {
       geminiCalls += 1;
+      geminiPrompt = JSON.parse(options.body).contents[0].parts[0].text;
       return Promise.resolve(createTextResponse(200, JSON.stringify({ candidates: [{ content: { parts: [{
         text: JSON.stringify({ "5.1:tomorrow": "Зміна для 5.1", "6.1:tomorrow": "Зміна для 6.1" })
       }] } }] })));
@@ -192,11 +204,13 @@ test("live revision scenario batches subscribed queues in one Gemini request", a
     return fetch(url, options);
   };
   const result = await runScenario({ caseName: "tomorrow-change", env: {
-    ...baseEnv, LIGHT_SUBSCRIPTIONS_FILE: subscriptionsFile
+    ...baseEnv, LIGHT_SUBSCRIPTIONS_FILE: subscriptionsFile, LIGHT_TREAT_YELLOW_AS_GREEN: "true"
   }, fetchImpl });
   assert.equal(result.notificationCount, 2);
   assert.equal(poeGets, 1);
   assert.equal(geminiCalls, 1);
+  assert.match(geminiPrompt, /🟢 Відключення скорочено/);
+  assert.doesNotMatch(geminiPrompt, /"state":3/);
   assert.deepEqual(messages.map(message => message.chat_id), ["chat-five", "chat-six"]);
   assert.match(messages[0].text, /Зміна для 5\.1/);
   assert.match(messages[1].text, /Зміна для 6\.1/);

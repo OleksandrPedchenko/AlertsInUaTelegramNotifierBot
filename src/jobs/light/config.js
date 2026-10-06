@@ -220,6 +220,7 @@ function loadLightConfig(_env, readers) {
       stateFilePath: readers.readResolvedPath("LIGHT_STATE_FILE_PATH", ".light-last-state.json"),
       stubFilePath: readers.readResolvedPath("LIGHT_STUB_FILE", "light-example.html"),
       useStub,
+      treatYellowAsGreen: readers.readBoolean("LIGHT_TREAT_YELLOW_AS_GREEN", true),
       alwaysSendTgMessage: readers.readBoolean("LIGHT_ALWAYS_SEND_TG_MESSAGE", false),
       outageReminderBeforeMinutes: readers.readNumber("LIGHT_OUTAGE_REMINDER_BEFORE_MINUTES", 0, {
         integer: true,

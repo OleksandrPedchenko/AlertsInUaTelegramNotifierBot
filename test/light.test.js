@@ -9,6 +9,8 @@ const { createEnvReader } = require("../src/lib/config");
 const { runPluginJob } = require("../src/lib/runner");
 const { writeJobState } = require("../src/lib/stateStore");
 const { loadLightConfig } = require("../src/jobs/light/config");
+const { effectiveSchedule } = require("../src/jobs/light/effectiveSchedule");
+const { buildGeminiPrompt } = require("../src/jobs/light/geminiClient");
 const { createDefaultState, createMockServer, renderPoeHtml } = require("../src/jobs/light/mockServer");
 const { parseLightSchedule } = require("../src/jobs/light/parser");
 const { findPendingOutageReminder, getChangedDays, lightPlugin, previousScheduleForDay } = require("../src/jobs/light/plugin");
@@ -92,8 +94,15 @@ test("light config reads LIGHT keys and falls back to xbar VAR keys", async () =
   assert.equal(config.poe.subQueue, 2);
   assert.equal(config.telegram.chatId, "tg-chat");
   assert.equal(config.job.useStub, false);
+  assert.equal(config.job.treatYellowAsGreen, true);
   assert.equal(config.job.stubFilePath, path.resolve(dir, "light-example.html"));
   assert.equal(config.gemini.enabled, false);
+});
+
+test("light config can keep yellow periods tentative", async () => {
+  const dir = await createTempDir();
+  const config = buildLightConfig(dir, { LIGHT_TREAT_YELLOW_AS_GREEN: "false" });
+  assert.equal(config.job.treatYellowAsGreen, false);
 });
 
 test("light config defaults Gemini to flash lite latest model", async () => {
@@ -104,6 +113,19 @@ test("light config defaults Gemini to flash lite latest model", async () => {
 
   assert.equal(config.gemini.enabled, true);
   assert.equal(config.gemini.model, "models/gemini-flash-lite-latest");
+});
+
+test("single-queue Gemini prompt follows green treatment of yellow", () => {
+  const previous = effectiveSchedule(parseLightSchedule(createPoeHtml([2, 2, 3, 1]), 2, 2), true);
+  const current = effectiveSchedule({
+    ...parseLightSchedule(createPoeHtml([2, 3, 1, 1]), 2, 2),
+    currentMinute: 0,
+    treatYellowAsGreen: true
+  }, true);
+  const prompt = buildGeminiPrompt(previous, current);
+  assert.match(prompt, /Жовтий період POE.*світлом/);
+  assert.match(prompt, /🟢.*Відключення скорочено/);
+  assert.doesNotMatch(prompt, /"state":3/);
 });
 
 test("light config allows localhost http mock URLs only", async () => {
@@ -269,6 +291,7 @@ test("light runner skips notification when selected queue fingerprint is unchang
   const config = buildLightConfig(dir);
   const previousState = {
     ...parseLightSchedule(html, config.poe.queue, config.poe.subQueue),
+    treatYellowAsGreen: true,
     sourceUrl: config.poe.url,
     responseStatus: 200,
   };
@@ -294,6 +317,85 @@ test("light runner skips notification when selected queue fingerprint is unchang
   assert.equal(telegramCalls, 0);
 });
 
+test("default light mode shows yellow as merged green and ignores yellow-to-green-only changes", async () => {
+  const dir = await createTempDir();
+  const oldHtml = createPoeHtml([2, 3, 1, 1]);
+  const newHtml = createPoeHtml([2, 1, 1, 1]);
+  const config = buildLightConfig(dir);
+  const messages = [];
+  await runPluginJob(lightPlugin, {}, {
+    config, logger: createSilentLogger(),
+    fetchImpl: createLightFetch(oldHtml, body => messages.push(body.text))
+  });
+  assert.match(messages[0], /🟢 00:30–02:00 · світло є/);
+  assert.doesNotMatch(messages[0], /🟡/);
+  const result = await runPluginJob(lightPlugin, {}, {
+    config, logger: createSilentLogger(),
+    fetchImpl: createLightFetch(newHtml, body => messages.push(body.text))
+  });
+  assert.equal(result.notified, false);
+  assert.equal(messages.length, 1);
+});
+
+test("strict light mode preserves yellow and detects its change to green", async () => {
+  const dir = await createTempDir();
+  const oldHtml = createPoeHtml([2, 3, 1, 1]);
+  const newHtml = createPoeHtml([2, 1, 1, 1]);
+  const config = buildLightConfig(dir, { LIGHT_TREAT_YELLOW_AS_GREEN: "false" });
+  const messages = [];
+  await runPluginJob(lightPlugin, {}, {
+    config, logger: createSilentLogger(),
+    fetchImpl: createLightFetch(oldHtml, body => messages.push(body.text))
+  });
+  assert.match(messages[0], /🟡 00:30–01:00 · можливо є/);
+  const result = await runPluginJob(lightPlugin, {}, {
+    config, logger: createSilentLogger(),
+    fetchImpl: createLightFetch(newHtml, body => messages.push(body.text))
+  });
+  assert.equal(result.notified, true);
+  assert.equal(messages.length, 2);
+});
+
+test("changing from strict to green mode does not announce a POE schedule change", async () => {
+  const dir = await createTempDir();
+  const html = createPoeHtml([2, 3, 1, 1]);
+  const strict = buildLightConfig(dir, { LIGHT_TREAT_YELLOW_AS_GREEN: "false" });
+  const green = buildLightConfig(dir);
+  const messages = [];
+  await runPluginJob(lightPlugin, {}, {
+    config: strict, logger: createSilentLogger(),
+    fetchImpl: createLightFetch(html, body => messages.push(body.text))
+  });
+  const switched = await runPluginJob(lightPlugin, {}, {
+    config: green, logger: createSilentLogger(),
+    fetchImpl: createLightFetch(html, body => messages.push(body.text))
+  });
+  assert.equal(switched.notified, false);
+  assert.equal(messages.length, 1);
+});
+
+test("default light mode sends a confirmed-on reminder at the yellow start", async () => {
+  const dir = await createTempDir();
+  const html = createPoeHtml([2, 3, 1, 1]);
+  const config = buildLightConfig(dir, {
+    LIGHT_CURRENT_MINUTE: "20",
+    LIGHT_OUTAGE_REMINDER_BEFORE_MINUTES: "10"
+  });
+  const previousState = parseLightSchedule(html, 2, 2);
+  await writeJobState(config.job.stateFilePath, lightPlugin.getStateKey(config), previousState,
+    lightPlugin.getStateFingerprint(previousState));
+  const messages = [];
+  const result = await runPluginJob(lightPlugin, {}, {
+    config, logger: createSilentLogger(),
+    fetchImpl: createLightFetch(html, body => messages.push(body.text))
+  });
+  assert.equal(result.notified, true);
+  assert.equal(messages.length, 1);
+  assert.match(messages[0], /🟢 Світло з’явиться через 10 хв/);
+  assert.match(messages[0], /00:30–02:00/);
+  assert.doesNotMatch(messages[0], /🟡/);
+});
+
 test("light runner sends upcoming outage reminder only once", async () => {
   const dir = await createTempDir();
   const html = createPoeHtml([1, 1, 2, 3]);
@@ -306,6 +408,7 @@ test("light runner sends upcoming outage reminder only once", async () => {
     ...parseLightSchedule(html, config.poe.queue, config.poe.subQueue, {
       now: new Date("2026-06-30T00:55:00")
     }),
+    treatYellowAsGreen: true,
     sourceUrl: config.poe.url,
     currentMinute: 55,
     responseStatus: 200,
@@ -499,6 +602,7 @@ test("light runner asks Gemini to explain changed segments when configured", asy
   const newHtml = createPoeHtml([2, 2, 1, 1]);
   const config = buildLightConfig(dir, {
     LIGHT_GEMINI_API_KEY: "gemini-key",
+    LIGHT_TREAT_YELLOW_AS_GREEN: "false",
     LIGHT_GEMINI_RETRY_BASE_DELAY_MS: "100"
   });
   const previousState = {
