@@ -71,6 +71,12 @@ for (const [caseName, time, expected, geminiCalls] of [
     if (caseName === "tomorrow-appears") {
       assert.doesNotMatch(actual.messages[0].text, /Було|Стало|Що змінилось/);
     }
+    if (caseName === "schedule-change") {
+      assert.match(actual.messages[0].text, /Було[^]*🔴 15:00–16:00[^]*Тепер[^]*🔴 15:00–16:30[^]*🟡 16:30–17:00/);
+    }
+    if (caseName === "tomorrow-change") {
+      assert.match(actual.messages[0].text, /Було[^]*🔴 10:00–11:00[^]*Тепер[^]*🔴 10:00–10:30[^]*🟡 10:30–11:00/);
+    }
     assert.equal(actual.geminiCalls, geminiCalls);
   });
 }

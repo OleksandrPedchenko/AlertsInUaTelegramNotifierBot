@@ -15,9 +15,9 @@ const scenarioSchedule = require("./scenarioSchedule.json");
 
 const CASES = Object.freeze({
   initial: { time: "12:00", description: "First schedule notification", seed: false },
-  "schedule-change": { time: "12:00", description: "Changed schedule with a real Gemini summary", gemini: true },
+  "schedule-change": { time: "12:00", description: "Today's outage extends by 30 minutes, with a real Gemini summary", gemini: true },
   "tomorrow-appears": { time: "12:00", description: "Tomorrow schedule first published without a comparison" },
-  "tomorrow-change": { time: "12:00", description: "Changed tomorrow schedule with a real Gemini summary", gemini: true },
+  "tomorrow-change": { time: "12:00", description: "Tomorrow's outage shortens by 30 minutes, with a real Gemini summary", gemini: true },
   "off-reminder": { time: "16:50", description: "Light off at 17:00" },
   "on-reminder": { time: "17:50", description: "Light on at 18:00" },
   "tentative-on": { time: "17:50", description: "Light may come on at 18:00" },
@@ -59,9 +59,18 @@ function makeStates(caseName, keys) {
     if (caseName === "schedule-change" || caseName === "tomorrow-change") {
       const cells = caseName === "schedule-change" ? today : tomorrow;
       const firstOutage = cells.findIndex((status, index) =>
-        status === 2 && index > 0 && cells[index - 1] === 1);
-      if (firstOutage < 0) throw new Error(`Scenario schedule ${key} has no outage to extend`);
-      cells[firstOutage - 1] = 2;
+        status === 2 && index > 0 && cells[index - 1] === 1 &&
+        (caseName === "schedule-change" || cells[index + 1] === 2));
+      if (firstOutage < 0) throw new Error(`Scenario schedule ${key} has no suitable outage`);
+      const end = cells.indexOf(3, firstOutage);
+      if (end < 0 || cells[end + 1] !== 1) throw new Error(`Scenario schedule ${key} has no return period`);
+      if (caseName === "schedule-change") {
+        cells[end] = 2;
+        cells[end + 1] = 3;
+      } else {
+        cells[end - 1] = 3;
+        cells[end] = 1;
+      }
     }
     if (["off-reminder", "schedule-and-off"].includes(caseName)) {
       today[33] = 1;

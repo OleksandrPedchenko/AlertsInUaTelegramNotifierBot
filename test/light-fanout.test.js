@@ -138,6 +138,9 @@ test("tomorrow-only changes get a separate tomorrow message", async () => {
     assert.doesNotMatch(messages[0].text, /<b>Сьогодні<\/b>/);
     assert.equal(prompts.length, 1);
     assert.match(prompts[0], /"day":"tomorrow"/);
+    assert.match(prompts[0], /🔴[^\n]*продовжено/);
+    assert.match(prompts[0], /🟡[^\n]*скорочено/);
+    assert.match(prompts[0], /старий і новий час/);
 
     messages.length = 0;
     state.days.today["1.1"].fill(2, 36, 38);
