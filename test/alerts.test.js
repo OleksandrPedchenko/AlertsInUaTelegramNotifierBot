@@ -125,3 +125,68 @@ test("ALWAYS_SEND_TG_MESSAGE bypasses unchanged-state skip", async () => {
   assert.equal(telegramBody.chat_id, "tg-chat");
   assert.match(telegramBody.text, /Відбій повітряної тривоги/);
 });
+
+for (const useStub of [false, true]) {
+  test(`alert levels persist and notify on level changes (${useStub ? "stub" : "API"})`, async () => {
+    const { writeFile } = require("fs/promises");
+    const { readJobState } = require("../src/lib/stateStore");
+    const dir = await createTempDir();
+    const stubPath = path.join(dir, "response.json");
+    const config = buildAlertsConfig(dir, {
+      ALERTS_USE_ACTIVE_ENDPOINT: "true",
+      ALERTS_ACTIVE_MATCH_CRITERIA: JSON.stringify({ location_uid: "106" }),
+      ALERTS_USE_STUB: String(useStub),
+      ALERTS_ACTIVE_STUB_FILE: stubPath
+    });
+    let payload;
+    let status = 200;
+    const messages = [];
+    const run = () => runPluginJob(alertsPlugin, {}, {
+      config,
+      logger: createSilentLogger(),
+      fetchImpl: async (_url, options) => {
+        if (options.method === "POST") {
+          messages.push(JSON.parse(options.body).text);
+          return createTextResponse(200, JSON.stringify({ ok: true }));
+        }
+        return createTextResponse(status, payload, { "last-modified": "Mon, 07 Sep 2026 10:00:00 GMT" });
+      }
+    });
+    for (const [level, label] of [["yellow", "🟡 Жовтий рівень"], ["red", "🔴 Червоний рівень"]]) {
+      payload = JSON.stringify({ alerts: [
+        { location_uid: "other", alert_level: "yellow" },
+        { location_uid: "106", alert_level: level }
+      ] });
+      await writeFile(stubPath, payload);
+      assert.equal((await run()).notified, true);
+      assert.ok(messages.at(-1).includes(label));
+      const record = await readJobState(config.job.stateFilePath, alertsPlugin.getStateKey(config));
+      assert.equal(record.state.alertLevel, level);
+      assert.equal((await run()).notified, false);
+    }
+    if (!useStub) {
+      status = 304;
+      assert.equal((await run()).changed, false);
+      const record = await readJobState(config.job.stateFilePath, alertsPlugin.getStateKey(config));
+      assert.equal(record.state.alertLevel, "red");
+      status = 200;
+    }
+    payload = JSON.stringify({ alerts: [] });
+    await writeFile(stubPath, payload);
+    assert.equal((await run()).notified, true);
+    assert.match(messages.at(-1), /Відбій/);
+    assert.doesNotMatch(messages.at(-1), /рівень/);
+    const record = await readJobState(config.job.stateFilePath, alertsPlugin.getStateKey(config));
+    assert.equal(record.state.alertLevel, null);
+  });
+}
+
+test("missing or unsupported alert levels keep the original message", () => {
+  const { parseActiveAlerts } = require("../src/jobs/alerts/api");
+  const { AlertMessageCatalog } = require("../src/jobs/alerts/messageCatalog");
+  for (const level of [undefined, "unknown"]) {
+    const parsed = parseActiveAlerts(JSON.stringify({ alerts: [{ id: 1, alert_level: level }] }), { id: 1 });
+    assert.equal(parsed.alertLevel, null);
+    assert.doesNotMatch(new AlertMessageCatalog().getMessageByStatus("A", parsed), /рівень/);
+  }
+});

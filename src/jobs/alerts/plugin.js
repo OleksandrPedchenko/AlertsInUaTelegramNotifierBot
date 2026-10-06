@@ -8,6 +8,7 @@ const { getRegionNameById } = require("./regionCatalog");
 const {
   ALERT_STATES,
   buildAlertsUrl,
+  parseActiveAlerts,
   parseActiveAlertsState,
   parseAlertState
 } = require("./api");
@@ -29,6 +30,7 @@ function toStateRecord(config, response, options = {}) {
     regionName,
     alertState: normalizedAlertState,
     rawAlertState: response.alertState,
+    alertLevel: response.alertLevel || null,
     lastModified: response.lastModified || null,
     responseStatus: response.status,
     source: options.source || "api",
@@ -51,7 +53,7 @@ async function readStubResponse(config) {
 
     return {
       status: 200,
-      alertState: parseActiveAlertsState(stubResponseBody, config.api.activeMatchCriteria),
+      ...parseActiveAlerts(stubResponseBody, config.api.activeMatchCriteria),
       rawBody: stubResponseBody,
       lastModified: null
     };
@@ -107,15 +109,16 @@ async function fetchAlertsFromApi(config, deps) {
     return {
       status: response.status,
       alertState: deps.previousState.rawAlertState || deps.previousState.alertState,
+      alertLevel: deps.previousState.alertLevel || null,
       rawBody: "",
       lastModified
     };
   }
 
-  const parsedState = config.api.useActiveEndpoint
-    ? parseActiveAlertsState(response.body, config.api.activeMatchCriteria)
-    : parseAlertState(response.body);
-  const alertState = String(parsedState || "").trim().toUpperCase();
+  const parsed = config.api.useActiveEndpoint
+    ? parseActiveAlerts(response.body, config.api.activeMatchCriteria)
+    : { alertState: parseAlertState(response.body), alertLevel: null };
+  const alertState = String(parsed.alertState || "").trim().toUpperCase();
 
   if (!ALERT_STATES.has(alertState)) {
     throw new HttpRequestError("Unexpected API response. Expected a single alert state char: N, A, or P", {
@@ -128,6 +131,7 @@ async function fetchAlertsFromApi(config, deps) {
   return {
     status: response.status,
     alertState,
+    alertLevel: parsed.alertLevel,
     rawBody: response.body,
     lastModified
   };
@@ -194,18 +198,17 @@ const alertsPlugin = {
   getStateFingerprint(state) {
     return JSON.stringify({
       regionId: state.regionId,
-      alertState: state.alertState
+      alertState: state.alertState,
+      alertLevel: state.alertLevel || null
     });
   },
 
-  getPreviousStateFingerprint(state, config, previousRecord) {
-    if (previousRecord && previousRecord.fingerprint && !previousRecord.legacy) {
-      return previousRecord.fingerprint;
-    }
+  getPreviousStateFingerprint(state, config) {
 
     return JSON.stringify({
       regionId: state.regionId,
-      alertState: normalizeAlertState(config, state.alertState)
+      alertState: normalizeAlertState(config, state.alertState),
+      alertLevel: state.alertLevel || null
     });
   },
 
@@ -220,7 +223,8 @@ const alertsPlugin = {
 
     return (
       !previousState ||
-      normalizeAlertState(config, previousState.alertState) !== currentState.alertState
+      normalizeAlertState(config, previousState.alertState) !== currentState.alertState ||
+      (previousState.alertLevel || null) !== currentState.alertLevel
     );
   },
 
@@ -231,7 +235,8 @@ const alertsPlugin = {
 
     if (
       previousState &&
-      normalizeAlertState(config, previousState.alertState) === currentState.alertState
+      normalizeAlertState(config, previousState.alertState) === currentState.alertState &&
+      (previousState.alertLevel || null) === currentState.alertLevel
     ) {
       return null;
     }
