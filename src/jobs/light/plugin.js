@@ -7,53 +7,24 @@ const { describeLightScheduleChange } = require("./geminiClient");
 const { buildLightNotification, buildOutageReminderNotification } = require("./messageCatalog");
 const { parseLightSchedule } = require("./parser");
 
-function encodePostBody(body) {
-  if (typeof body === "string") {
-    return body;
-  }
-
-  return `disconn=${encodeURIComponent(JSON.stringify(body))}`;
-}
-
 async function fetchPoeData(config, deps) {
-  const postBody = encodePostBody(config.poe.postBody);
-
-  const [getResponse, postResponse] = await Promise.all([
-    deps.requestWithRetry({
-      url: config.poe.url,
-      headers: {
-        Accept: "text/html,application/xhtml+xml,application/xml",
-        "User-Agent": "alerts-tg-bot/1.0"
-      },
-      timeoutMs: config.poe.timeoutMs,
-      maxRetries: config.poe.maxRetries,
-      retryBaseDelayMs: config.poe.retryBaseDelayMs,
-      responseType: "text",
-      fetchImpl: deps.fetchImpl,
-      logger: deps.logger
-    }),
-    deps.requestWithRetry({
-      method: "POST",
-      url: config.poe.postUrl,
-      headers: {
-        Accept: "text/html,application/xhtml+xml,application/xml",
-        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-        "User-Agent": "alerts-tg-bot/1.0"
-      },
-      body: postBody,
-      timeoutMs: config.poe.timeoutMs,
-      maxRetries: config.poe.maxRetries,
-      retryBaseDelayMs: config.poe.retryBaseDelayMs,
-      responseType: "text",
-      fetchImpl: deps.fetchImpl,
-      logger: deps.logger
-    })
-  ]);
+  const getResponse = await deps.requestWithRetry({
+    url: config.poe.url,
+    headers: {
+      Accept: "text/html,application/xhtml+xml,application/xml",
+      "User-Agent": "alerts-tg-bot/1.0"
+    },
+    timeoutMs: config.poe.timeoutMs,
+    maxRetries: config.poe.maxRetries,
+    retryBaseDelayMs: config.poe.retryBaseDelayMs,
+    responseType: "text",
+    fetchImpl: deps.fetchImpl,
+    logger: deps.logger
+  });
 
   return {
     html: getResponse.body,
-    getStatus: getResponse.status,
-    postStatus: postResponse.status
+    getStatus: getResponse.status
   };
 }
 
@@ -62,8 +33,7 @@ async function readStubData(config) {
     const html = await readFile(config.job.stubFilePath, "utf8");
     return {
       html,
-      getStatus: 200,
-      postStatus: null
+      getStatus: 200
     };
   } catch (error) {
     throw new HttpRequestError(`Failed to read light stub file: ${config.job.stubFilePath}`, {
@@ -197,7 +167,6 @@ const lightPlugin = {
   async fetchCurrent(config, deps) {
     deps.logger.info("Starting light polling job", {
       url: config.poe.url,
-      postUrl: config.poe.postUrl,
       queue: config.poe.queue,
       subQueue: config.poe.subQueue,
       useStub: config.job.useStub
@@ -227,7 +196,6 @@ const lightPlugin = {
       currentMinute,
       scheduleDate: getLocalDate(),
       responseStatus: response.getStatus,
-      postResponseStatus: response.postStatus,
       outageReminders: {
         sentIds: getSentOutageReminderIds(deps.previousState)
       }
@@ -242,7 +210,6 @@ const lightPlugin = {
       queue: config.poe.queue,
       subQueue: config.poe.subQueue,
       responseStatus: response.getStatus,
-      postResponseStatus: response.postStatus,
       updatedAt: currentState.updatedAt,
       todayPeriods: currentState.today.timePeriods.length,
       tomorrowPeriods: currentState.tomorrow.timePeriods.length,
@@ -363,7 +330,6 @@ const lightPlugin = {
 };
 
 module.exports = {
-  encodePostBody,
   buildOutageReminderId,
   dateFromCurrentMinute,
   findPendingOutageReminder,

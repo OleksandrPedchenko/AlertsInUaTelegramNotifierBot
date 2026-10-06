@@ -3,19 +3,11 @@
 const { ConfigError } = require("../../lib/config");
 
 const DEFAULT_POE_URL = "https://www.poe.pl.ua/customs/dynamicgpv-info.php";
-const DEFAULT_POE_POST_URL = "https://www.poe.pl.ua/customs/search-disconnection.php";
 const DEFAULT_GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
 const DEFAULT_GEMINI_MODEL = "models/gemini-flash-lite-latest";
 const DEFAULT_LOKI_IP = "192.168.0.41";
 const DEFAULT_LOKI_PORT = 3100;
 const DEFAULT_LOKI_TIMEOUT_MS = 2000;
-const DEFAULT_POST_BODY = Object.freeze({
-  varn: 0,
-  filial: "8",
-  city_name: "с.Зайченці",
-  street_name: "вул.Польова (Гагаріна)",
-  building_num: "18"
-});
 
 function readNumberFromKeys(readers, keys, fallback, validation) {
   for (const key of keys) {
@@ -69,26 +61,6 @@ function readPoeUrl(readers, key, fallback) {
   }
 
   return parsed.toString();
-}
-
-function readPostBody(readers) {
-  const rawJson = readers.readOptionalString("LIGHT_POST_BODY_JSON");
-  if (!rawJson) {
-    return DEFAULT_POST_BODY;
-  }
-
-  let parsed;
-  try {
-    parsed = JSON.parse(rawJson);
-  } catch {
-    throw new ConfigError("LIGHT_POST_BODY_JSON must be valid JSON");
-  }
-
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new ConfigError("LIGHT_POST_BODY_JSON must be a JSON object");
-  }
-
-  return parsed;
 }
 
 function readGeminiConfig(readers) {
@@ -178,8 +150,6 @@ function loadLightConfig(_env, readers) {
   return {
     poe: {
       url: readPoeUrl(readers, "LIGHT_POE_URL", DEFAULT_POE_URL),
-      postUrl: readPoeUrl(readers, "LIGHT_POE_POST_URL", DEFAULT_POE_POST_URL),
-      postBody: readPostBody(readers),
       queue,
       subQueue,
       timeoutMs: readNumberFromKeys(readers, ["LIGHT_HTTP_TIMEOUT_MS", "HTTP_TIMEOUT_MS"], 10000, {
@@ -258,9 +228,7 @@ function loadLightConfig(_env, readers) {
 }
 
 module.exports = {
-  DEFAULT_POE_POST_URL,
   DEFAULT_POE_URL,
   DEFAULT_GEMINI_MODEL,
-  DEFAULT_POST_BODY,
   loadLightConfig
 };

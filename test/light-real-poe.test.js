@@ -12,7 +12,7 @@ test("real POE command accepts HH:MM and rejects incomplete options", () => {
   assert.throws(() => parseArgs(["--time"]), /incomplete/);
 });
 
-test("real POE command fetches official endpoints and uses isolated persistent state", async () => {
+test("real POE command fetches only the official schedule and uses isolated persistent state", async () => {
   const cwd = await createTempDir();
   const html = await readFile(path.join(__dirname, "../light-example.html"), "utf8");
   const requests = [];
@@ -28,7 +28,6 @@ test("real POE command fetches official endpoints and uses isolated persistent s
   const env = {
     TG_BOT_TOKEN: "test-token", LIGHT_TG_CHAT_ID: "demo-chat",
     LIGHT_POE_URL: "http://127.0.0.1:3010/customs/dynamicgpv-info.php",
-    LIGHT_POE_POST_URL: "http://127.0.0.1:3010/customs/search-disconnection.php",
     LIGHT_USE_STUB: "true"
   };
 
@@ -38,6 +37,8 @@ test("real POE command fetches official endpoints and uses isolated persistent s
   assert.equal(second.notified, false);
   assert.equal(messages.length, 1);
   assert.equal(messages[0].chat_id, "demo-chat");
-  assert.ok(requests.some(([url, method]) => url === "https://www.poe.pl.ua/customs/dynamicgpv-info.php" && method === "GET"));
-  assert.ok(requests.some(([url, method]) => url === "https://www.poe.pl.ua/customs/search-disconnection.php" && method === "POST"));
+  assert.deepEqual(requests.filter(([url]) => !url.includes("api.telegram.org")), [
+    ["https://www.poe.pl.ua/customs/dynamicgpv-info.php", "GET"],
+    ["https://www.poe.pl.ua/customs/dynamicgpv-info.php", "GET"]
+  ]);
 });

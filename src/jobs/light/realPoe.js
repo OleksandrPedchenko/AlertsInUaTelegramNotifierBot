@@ -3,7 +3,7 @@
 const path = require("node:path");
 const { createEnvReader } = require("../../lib/config");
 const { createFallbackLogger, runPluginJob } = require("../../lib/runner");
-const { DEFAULT_POE_POST_URL, DEFAULT_POE_URL, loadLightConfig } = require("./config");
+const { DEFAULT_POE_URL, loadLightConfig } = require("./config");
 const { lightPlugin } = require("./plugin");
 const { parseClockTime } = require("./scenarios");
 
@@ -39,7 +39,6 @@ async function runRealPoe({ time, queue = 5, subQueue = 1, leadMinutes = 10, alw
   const realEnv = {
     ...env,
     LIGHT_POE_URL: DEFAULT_POE_URL,
-    LIGHT_POE_POST_URL: DEFAULT_POE_POST_URL,
     LIGHT_USE_STUB: "false",
     LIGHT_QUEUE: String(selectedQueue),
     LIGHT_SUB_QUEUE: String(selectedSubQueue),

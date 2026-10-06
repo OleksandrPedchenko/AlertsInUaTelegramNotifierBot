@@ -11,7 +11,7 @@ const { writeJobState } = require("../src/lib/stateStore");
 const { loadLightConfig } = require("../src/jobs/light/config");
 const { createDefaultState, createMockServer, renderPoeHtml } = require("../src/jobs/light/mockServer");
 const { parseLightSchedule } = require("../src/jobs/light/parser");
-const { encodePostBody, findPendingOutageReminder, lightPlugin } = require("../src/jobs/light/plugin");
+const { findPendingOutageReminder, lightPlugin } = require("../src/jobs/light/plugin");
 const { createMemoryLogger, createSilentLogger, createTempDir, createTextResponse } = require("./helpers");
 
 function row(statuses) {
@@ -72,10 +72,6 @@ function createLightFetch(html, onTelegram) {
       return createTextResponse(200, JSON.stringify({ ok: true }));
     }
 
-    if (options.method === "POST") {
-      return createTextResponse(200, "post ok");
-    }
-
     return createTextResponse(200, html);
   };
 }
@@ -113,12 +109,10 @@ test("light config defaults Gemini to flash lite latest model", async () => {
 test("light config allows localhost http mock URLs only", async () => {
   const dir = await createTempDir();
   const config = buildLightConfig(dir, {
-    LIGHT_POE_URL: "http://127.0.0.1:3010/customs/dynamicgpv-info.php",
-    LIGHT_POE_POST_URL: "http://localhost:3010/customs/search-disconnection.php"
+    LIGHT_POE_URL: "http://127.0.0.1:3010/customs/dynamicgpv-info.php"
   });
 
   assert.equal(config.poe.url, "http://127.0.0.1:3010/customs/dynamicgpv-info.php");
-  assert.equal(config.poe.postUrl, "http://localhost:3010/customs/search-disconnection.php");
 
   assert.throws(
     () =>
@@ -225,13 +219,6 @@ test("light parser preserves xbar row offset and segment grouping", () => {
   assert.equal(schedule.today.totalTimeOff, 30);
 });
 
-test("light post body keeps xbar disconn encoding", () => {
-  assert.equal(
-    encodePostBody({ city_name: "с.Зайченці" }),
-    `disconn=${encodeURIComponent(JSON.stringify({ city_name: "с.Зайченці" }))}`
-  );
-});
-
 test("light parser rejects HTML without the selected schedule row", () => {
   assert.throws(
     () => parseLightSchedule("<html><body>Service unavailable</body></html>", 2, 2),
@@ -275,7 +262,6 @@ test("light runner skips notification when selected queue fingerprint is unchang
     ...parseLightSchedule(html, config.poe.queue, config.poe.subQueue),
     sourceUrl: config.poe.url,
     responseStatus: 200,
-    postResponseStatus: 200
   };
 
   await writeJobState(
@@ -314,7 +300,6 @@ test("light runner sends upcoming outage reminder only once", async () => {
     sourceUrl: config.poe.url,
     currentMinute: 55,
     responseStatus: 200,
-    postResponseStatus: 200
   };
 
   await writeJobState(
@@ -362,7 +347,6 @@ test("light runner sends Telegram notification when selected queue schedule chan
     ...parseLightSchedule(oldHtml, config.poe.queue, config.poe.subQueue),
     sourceUrl: config.poe.url,
     responseStatus: 200,
-    postResponseStatus: 200
   };
 
   await writeJobState(
@@ -437,7 +421,6 @@ test("light runner sends schedule change and outage reminder as separate message
     sourceUrl: config.poe.url,
     currentMinute: 55,
     responseStatus: 200,
-    postResponseStatus: 200
   };
 
   await writeJobState(
@@ -479,7 +462,6 @@ test("light runner asks Gemini to explain changed segments when configured", asy
     ...parseLightSchedule(oldHtml, config.poe.queue, config.poe.subQueue),
     sourceUrl: config.poe.url,
     responseStatus: 200,
-    postResponseStatus: 200
   };
 
   await writeJobState(
@@ -518,10 +500,6 @@ test("light runner asks Gemini to explain changed segments when configured", asy
       if (urlText.includes("api.telegram.org")) {
         telegramBody = JSON.parse(options.body);
         return createTextResponse(200, JSON.stringify({ ok: true }));
-      }
-
-      if (options.method === "POST") {
-        return createTextResponse(200, "post ok");
       }
 
       return createTextResponse(200, newHtml);

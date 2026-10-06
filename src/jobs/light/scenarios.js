@@ -89,7 +89,6 @@ async function runScenario({ caseName, time, queue = 5, subQueue = 1, leadMinute
       LIGHT_QUEUE: String(selectedQueue),
       LIGHT_SUB_QUEUE: String(selectedSubQueue),
       LIGHT_POE_URL: `${baseUrl}/customs/dynamicgpv-info.php`,
-      LIGHT_POE_POST_URL: `${baseUrl}/customs/search-disconnection.php`,
       LIGHT_USE_STUB: "false",
       LIGHT_ALWAYS_SEND_TG_MESSAGE: "false",
       LIGHT_OUTAGE_REMINDER_BEFORE_MINUTES: String(selectedLead),

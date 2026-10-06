@@ -49,7 +49,7 @@ test("mock serves editable parser-compatible POE HTML and POST endpoint", async 
   }
 });
 
-test("light worker fetches both local mock endpoints and sends a schedule message", async () => {
+test("light worker fetches only the local mock schedule and sends a schedule message", async () => {
   const server = createMockServer();
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
@@ -57,13 +57,13 @@ test("light worker fetches both local mock endpoints and sends a schedule messag
   const env = {
     TG_BOT_TOKEN: "test-token", TG_CHAT_ID: "test-chat",
     LIGHT_POE_URL: `${base}/customs/dynamicgpv-info.php`,
-    LIGHT_POE_POST_URL: `${base}/customs/search-disconnection.php`,
     LIGHT_LOCK_FILE_PATH: path.join(dir, "light.lock"),
     LIGHT_STATE_FILE_PATH: path.join(dir, "state.json"),
     LOG_FILE_PATH: path.join(dir, "light.log")
   };
   const config = loadLightConfig(env, createEnvReader(env, { cwd: dir }));
   let message;
+  const poeRequests = [];
   try {
     const result = await runPluginJob(lightPlugin, env, {
       config, logger: createSilentLogger(),
@@ -72,12 +72,14 @@ test("light worker fetches both local mock endpoints and sends a schedule messag
           message = JSON.parse(options.body);
           return Promise.resolve(createTextResponse(200, JSON.stringify({ ok: true })));
         }
+        poeRequests.push([String(url), options?.method || "GET"]);
         return fetch(url, options);
       }
     });
     assert.equal(result.notified, true);
     assert.equal(message.chat_id, "test-chat");
     assert.match(message.text, /Графік світла: 5\.1 черга/);
+    assert.deepEqual(poeRequests, [[`${base}/customs/dynamicgpv-info.php`, "GET"]]);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
