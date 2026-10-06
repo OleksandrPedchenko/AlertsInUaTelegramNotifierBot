@@ -96,10 +96,29 @@ One-shot Node.js job that fetches active air raid alert state for a region and t
 - `LIGHT_STATE_FILE_PATH` (optional): default `.light-last-state.json`.
 - `LIGHT_ALWAYS_SEND_TG_MESSAGE` (optional): if `true`, sends a Telegram message on every run. Default `false`.
 - `LIGHT_OUTAGE_REMINDER_BEFORE_MINUTES` (optional): sends one reminder before each turn-off and turn-on transition when it starts in `N` minutes or less. Default `0` disables reminders. Reminder IDs include the date so the same time can notify again tomorrow.
+- `LIGHT_CURRENT_MINUTE` (optional): override the local clock for a regular light run with an integer from `0` to `1439`; the live scenario command uses `--time HH:MM` instead.
 
 ### Local POE mock
 
 `npm run start:light:mock` serves a horizontally scrolling 48-cell schedule builder for today and tomorrow, queues `1–6`, and subqueues `1–2`. Builder edits save automatically. The raw editor can replace exactly the HTML returned by `GET /customs/dynamicgpv-info.php`; “Load generated” copies the current builder output into the editor, and “Use schedule builder” switches the endpoint back to generated HTML. `POST /customs/search-disconnection.php` returns a successful mock response. Changes take effect without restarting the server.
+
+### Live light notification scenarios
+
+Set `TG_BOT_TOKEN` and `LIGHT_TG_CHAT_ID` in `.env` to your **demo bot and group**. For schedule-change cases, also set `GEMINI_API_KEY` or `LIGHT_GEMINI_API_KEY`. These commands send real Telegram messages, and the schedule-change cases make real Gemini requests:
+
+```sh
+npm run test:light:live -- --list
+npm run test:light:live -- --case initial
+npm run test:light:live -- --case schedule-change
+npm run test:light:live -- --case off-reminder --time 16:50
+npm run test:light:live -- --case on-reminder --time 17:50
+npm run test:light:live -- --case tentative-on --time 17:50
+npm run test:light:live -- --case midnight-off --time 23:50
+npm run test:light:live -- --case midnight-on --time 23:50
+npm run test:light:live -- --case schedule-and-off --time 16:50
+```
+
+`--time HH:MM` sets the worker's current local clock time for the run. Each case has a default time shown by `--list`; `--lead N` changes the reminder window from the default 10 minutes. `--queue 1..6` and `--subqueue 1..2` select the queue shown in the message (defaults `5.1`). A reminder sends only if its transition falls after the selected time and within the lead window. `schedule-and-off` sends two messages. Each command starts a temporary local POE mock server, fetches its GET and POST endpoints, and uses isolated state, so it does not change the mock builder at `127.0.0.1:3010` or the worker's saved state. The temporary mock URL in the message stops working when the command ends.
 
 ## Cron Setup (Every N Minutes)
 
