@@ -16,11 +16,12 @@ const { createSilentLogger, createTempDir, createTextResponse } = require("./hel
 test("fan-out fetches POE once and batches changed queues into one Gemini call", async () => {
   const dir = await createTempDir();
   const subscriptionsFile = path.join(dir, "subscriptions.json");
-  await fs.writeFile(subscriptionsFile, JSON.stringify({ subscriptions: [
-    { queue: 5, subQueue: 1, chatId: "chat-a" },
-    { queue: 2, subQueue: 2, chatId: "chat-b" },
-    { queue: 3, subQueue: 1, chatId: "chat-c" }
-  ] }));
+  await fs.writeFile(subscriptionsFile, JSON.stringify({ queues: {
+    "1.1": { enabled: false, chatIds: [] },
+    "5.1": { enabled: true, chatIds: ["chat-a"] },
+    "2.2": { enabled: true, chatIds: ["chat-b"] },
+    "3.1": { enabled: true, chatIds: ["chat-c"] }
+  } }));
   const state = createDefaultState();
   state.days.today["5.1"] = Array(48).fill(1);
   state.days.today["2.2"] = Array(48).fill(1);
@@ -224,6 +225,35 @@ test("subscriptions reject duplicate destination and invalid queue", async () =>
   await assert.rejects(loadSubscriptions(file), /duplicate/i);
   await fs.writeFile(file, JSON.stringify({ subscriptions: [{ queue: 7, subQueue: 1, chatId: "a" }] }));
   await assert.rejects(loadSubscriptions(file), /queue/i);
+});
+
+test("queue-keyed subscriptions validate enabled destinations", async () => {
+  const dir = await createTempDir();
+  const file = path.join(dir, "subscriptions.json");
+  await fs.writeFile(file, JSON.stringify({ queues: {
+    "1.1": { enabled: false, chatIds: [] }
+  } }));
+  await assert.rejects(loadSubscriptions(file), /no enabled destinations/i);
+  await fs.writeFile(file, JSON.stringify({ queues: {
+    "7.1": { enabled: true, chatIds: ["chat-a"] }
+  } }));
+  await assert.rejects(loadSubscriptions(file), /queue/i);
+  await fs.writeFile(file, JSON.stringify({ queues: {
+    "1.1": { enabled: true, chatIds: [] }
+  } }));
+  await assert.rejects(loadSubscriptions(file), /chatIds/i);
+  await fs.writeFile(file, JSON.stringify({ queues: {
+    "1.1": { enabled: true, chatIds: ["chat-a", "chat-a"] }
+  } }));
+  await assert.rejects(loadSubscriptions(file), /duplicate/i);
+  await fs.writeFile(file, JSON.stringify({ queues: {
+    "1.1": { enabled: false, chatIds: ["saved-for-later"] },
+    "5.1": { enabled: true, chatIds: ["chat-a", "chat-b"] }
+  } }));
+  assert.deepEqual(await loadSubscriptions(file), [
+    { queue: 5, subQueue: 1, chatId: "chat-a" },
+    { queue: 5, subQueue: 1, chatId: "chat-b" }
+  ]);
 });
 
 test("a failed group retries without resending successful groups", async () => {

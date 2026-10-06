@@ -21,26 +21,54 @@ async function loadSubscriptions(filePath) {
   } catch (error) {
     throw new Error(`Cannot read light subscriptions at ${filePath}: ${error.message}`);
   }
-  if (!data || !Array.isArray(data.subscriptions) || data.subscriptions.length === 0) {
-    throw new Error("Light subscriptions JSON needs a non-empty subscriptions array");
-  }
   const seen = new Set();
-  return data.subscriptions.map((item, index) => {
+  function addSubscription(item, label) {
     const queue = item?.queue;
     const subQueue = item?.subQueue;
     const chatId = typeof item?.chatId === "string" ? item.chatId.trim() : "";
     if (!Number.isInteger(queue) || queue < 1 || queue > 6) {
-      throw new Error(`Subscription ${index + 1}: queue must be an integer from 1 to 6`);
+      throw new Error(`${label}: queue must be an integer from 1 to 6`);
     }
     if (!Number.isInteger(subQueue) || subQueue < 1 || subQueue > 2) {
-      throw new Error(`Subscription ${index + 1}: subQueue must be 1 or 2`);
+      throw new Error(`${label}: subQueue must be 1 or 2`);
     }
-    if (!chatId) throw new Error(`Subscription ${index + 1}: chatId is required`);
+    if (!chatId) throw new Error(`${label}: chatId is required`);
     const key = `${queue}.${subQueue}:${chatId}`;
     if (seen.has(key)) throw new Error(`Duplicate subscription: ${key}`);
     seen.add(key);
     return { queue, subQueue, chatId };
-  });
+  }
+
+  if (data?.queues && !Array.isArray(data.queues) && typeof data.queues === "object") {
+    const subscriptions = [];
+    for (const [key, entry] of Object.entries(data.queues)) {
+      const match = key.match(/^([1-6])\.([12])$/);
+      if (!match) throw new Error(`Invalid queue key: ${key}`);
+      if (!entry || typeof entry !== "object" || Array.isArray(entry) || typeof entry.enabled !== "boolean") {
+        throw new Error(`Queue ${key}: enabled must be a boolean`);
+      }
+      const chatIds = entry.chatIds ?? [];
+      if (!Array.isArray(chatIds) || (entry.enabled && chatIds.length === 0)) {
+        throw new Error(`Queue ${key}: chatIds must be a non-empty array when enabled`);
+      }
+      for (const chatId of chatIds) {
+        if (entry.enabled) {
+          subscriptions.push(addSubscription({
+            queue: Number(match[1]), subQueue: Number(match[2]), chatId
+          }, `Queue ${key}`));
+        } else if (typeof chatId !== "string" || !chatId.trim()) {
+          throw new Error(`Queue ${key}: chatIds must contain non-empty strings`);
+        }
+      }
+    }
+    if (subscriptions.length === 0) throw new Error("Light subscriptions have no enabled destinations");
+    return subscriptions;
+  }
+
+  if (!data || !Array.isArray(data.subscriptions) || data.subscriptions.length === 0) {
+    throw new Error("Light subscriptions JSON needs a queues object or non-empty subscriptions array");
+  }
+  return data.subscriptions.map((item, index) => addSubscription(item, `Subscription ${index + 1}`));
 }
 
 function changeCacheKey(item) {

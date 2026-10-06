@@ -81,10 +81,10 @@ test("schedule change and imminent outage send two separate messages", async () 
 test("live tomorrow publication scenario sends to every subscribed chat", async () => {
   const dir = await createTempDir();
   const subscriptionsFile = path.join(dir, "subscriptions.json");
-  await fs.writeFile(subscriptionsFile, JSON.stringify({ subscriptions: [
-    { queue: 5, subQueue: 1, chatId: "chat-five" },
-    { queue: 6, subQueue: 1, chatId: "chat-six" }
-  ] }));
+  await fs.writeFile(subscriptionsFile, JSON.stringify({ queues: {
+    "5.1": { enabled: true, chatIds: ["chat-five"] },
+    "6.1": { enabled: true, chatIds: ["chat-six"] }
+  } }));
   const messages = [];
   let poeGets = 0;
   let geminiCalls = 0;
@@ -119,10 +119,10 @@ test("live tomorrow publication scenario sends to every subscribed chat", async 
 test("live revision scenario batches subscribed queues in one Gemini request", async () => {
   const dir = await createTempDir();
   const subscriptionsFile = path.join(dir, "subscriptions.json");
-  await fs.writeFile(subscriptionsFile, JSON.stringify({ subscriptions: [
-    { queue: 5, subQueue: 1, chatId: "chat-five" },
-    { queue: 6, subQueue: 1, chatId: "chat-six" }
-  ] }));
+  await fs.writeFile(subscriptionsFile, JSON.stringify({ queues: {
+    "5.1": { enabled: true, chatIds: ["chat-five"] },
+    "6.1": { enabled: true, chatIds: ["chat-six"] }
+  } }));
   const messages = [];
   let poeGets = 0;
   let geminiCalls = 0;

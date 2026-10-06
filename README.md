@@ -103,7 +103,7 @@ One-shot Node.js job that fetches active air raid alert state for a region and t
 
 ### Multiple queues and Telegram groups
 
-Copy `light-subscriptions.example.json` to `light-subscriptions.json`, edit its entries, and set `LIGHT_SUBSCRIPTIONS_FILE=light-subscriptions.json` in `.env` or the light systemd service. Each entry has an integer `queue` (1–6), integer `subQueue` (1–2), and a string `chatId`. The same queue may appear for several chats; an identical queue/subqueue/chat entry is rejected. Keep `TG_BOT_TOKEN` in `.env`, not the JSON file. The local `light-subscriptions.json` file is ignored by Git.
+Copy `light-subscriptions.example.json` to `light-subscriptions.json` and set `LIGHT_SUBSCRIPTIONS_FILE=light-subscriptions.json` in `.env` or the light systemd service. The example lists all 12 queue and subqueue keys, disabled by default. Set `enabled` to `true` and put one or more Telegram chat IDs in `chatIds` for each queue you want to track. You may remove unused keys; at least one enabled queue with a chat ID is required. Duplicate chat IDs within one queue are rejected. The old `subscriptions` array remains accepted during migration. Keep `TG_BOT_TOKEN` in `.env`, not the JSON file. The local `light-subscriptions.json` file is ignored by Git.
 
 `npm run start:light` remains the systemd command. With the subscriptions file configured, each run fetches the POE schedule once, evaluates each unique queue, and sends Telegram messages to the corresponding chats. Delivery state is saved per queue and chat. If one chat fails, other successful deliveries stay recorded, and only the failed chat retries on the next run. The first run in multi-group mode sends an initial schedule to every configured chat; the old single-queue state is not reused.
 
