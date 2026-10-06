@@ -10,9 +10,9 @@ const { normalizeNotifications } = require("../../lib/runner");
 const { readJobState, writeJobState } = require("../../lib/stateStore");
 const { sendTelegramMessage } = require("../../lib/telegramNotifier");
 const { loadLightConfig } = require("./config");
-const { buildGeminiUrl, extractGeminiText, normalizeSegmentsForGemini } = require("./geminiClient");
+const { buildGeminiUrl, extractGeminiText, normalizePeriodForPrompt } = require("./geminiClient");
 const { parseLightSchedule } = require("./parser");
-const { buildCurrentLightState, dateFromCurrentMinute, fetchPoeData, getCurrentMinute, lightPlugin, readStubData } = require("./plugin");
+const { buildCurrentLightState, dateFromCurrentMinute, dayFingerprint, fetchPoeData, getChangedDays, getCurrentMinute, lightPlugin, previousScheduleForDay, readStubData } = require("./plugin");
 
 async function loadSubscriptions(filePath) {
   let data;
@@ -44,24 +44,20 @@ async function loadSubscriptions(filePath) {
 }
 
 function changeCacheKey(item) {
-  const oldFingerprint = lightPlugin.getStateFingerprint(item.previousState);
-  const timeSlot = Math.floor(item.currentState.currentMinute / 30);
-  const digest = createHash("sha256").update(`${item.currentState.scheduleDate}:${timeSlot}\n${oldFingerprint}\n${item.fingerprint}`).digest("hex");
-  return `light:gemini:${item.queueKey}:${digest}`;
+  const oldFingerprint = dayFingerprint(item.previousDay);
+  const newFingerprint = dayFingerprint(item.currentDay);
+  const timeSlot = item.day === "today" ? Math.floor(item.currentState.currentMinute / 30) : "tomorrow";
+  const digest = createHash("sha256").update(`${item.currentState.scheduleDate}:${timeSlot}\n${oldFingerprint}\n${newFingerprint}`).digest("hex");
+  return `light:gemini:${item.queueKey}:${item.day}:${digest}`;
 }
 
 function batchPrompt(items) {
   const changes = items.map(item => ({
     id: item.batchId,
-    currentMinute: item.currentState.currentMinute,
-    today: {
-      old: normalizeSegmentsForGemini(item.previousState, "today"),
-      now: normalizeSegmentsForGemini(item.currentState, "today")
-    },
-    tomorrow: {
-      old: normalizeSegmentsForGemini(item.previousState, "tomorrow"),
-      now: normalizeSegmentsForGemini(item.currentState, "tomorrow")
-    }
+    day: item.day,
+    currentMinute: item.day === "today" ? item.currentState.currentMinute : null,
+    old: item.previousDay.timePeriods.map(normalizePeriodForPrompt),
+    now: item.currentDay.timePeriods.map(normalizePeriodForPrompt)
   }));
   return [
     "Поясни українською зміни графіка світла окремо для кожного id.",
@@ -107,10 +103,17 @@ async function prepareGeminiSummaries(items, config, deps) {
   const cache = { ...((await readJobState(config.job.stateFilePath, cacheKey))?.state?.entries || {}) };
   const unique = new Map();
   for (const item of items) {
-    if (!item.changed || !item.previousState) continue;
-    const key = changeCacheKey(item);
-    item.changeCacheKey = key;
-    if (!unique.has(key)) unique.set(key, item);
+    item.changeCacheKeys = {};
+    if (!item.previousState) continue;
+    for (const day of getChangedDays(item.previousState, item.currentState)) {
+      const previousDay = previousScheduleForDay(item.previousState, item.currentState, day);
+      if (!previousDay) continue;
+      const change = { ...item, day, previousDay, currentDay: item.currentState[day] };
+      const key = changeCacheKey(change);
+      item.changeCacheKeys[day] = key;
+      change.changeCacheKey = key;
+      if (!unique.has(key)) unique.set(key, change);
+    }
   }
   const missing = [];
   for (const [key, item] of unique) {
@@ -118,7 +121,7 @@ async function prepareGeminiSummaries(items, config, deps) {
     if (typeof cached?.summary === "string") {
       summaries.set(key, cached.summary);
     } else if (!cached?.retryAfter || Date.now() >= cached.retryAfter) {
-      item.batchId = item.queueKey;
+      item.batchId = `${item.queueKey}:${item.day}`;
       if (missing.some(other => other.batchId === item.batchId)) item.batchId = `${item.queueKey}#${missing.length + 1}`;
       missing.push(item);
     }
@@ -217,16 +220,22 @@ async function runFanout(env = process.env, options = {}) {
     const lastSentAt = new Map();
     for (const item of items) {
       try {
-        if (!lightPlugin.shouldNotify({ changed: item.changed, config: item.config, currentState: item.currentState })) {
+        if (!lightPlugin.shouldNotify({ previousState: item.previousState, changed: item.changed, config: item.config, currentState: item.currentState })) {
           await writeJobState(config.job.stateFilePath, item.stateKey, item.currentState, item.fingerprint);
           continue;
         }
+        const deliveryDeps = {
+          ...deps,
+          changeSummaries: Object.fromEntries(["today", "tomorrow"].map(day =>
+            [day, summaries.get(item.changeCacheKeys?.[day]) || ""]
+          ))
+        };
         const notifications = normalizeNotifications(await lightPlugin.buildNotification({
           previousState: item.previousState,
           currentState: item.currentState,
           changed: item.changed,
           config: item.config,
-          deps: { ...deps, changeSummary: summaries.get(item.changeCacheKey) || "" }
+          deps: deliveryDeps
         }));
         for (const notification of notifications) {
           const chatId = item.config.telegram.chatId;
@@ -239,7 +248,10 @@ async function runFanout(env = process.env, options = {}) {
             jobName: "light", queue: item.queueKey, chatId, type: notification.type
           });
           const updated = await lightPlugin.afterNotificationSuccess({
-            currentState: item.currentState, notifications: [notification]
+            previousState: item.previousState,
+            currentState: item.currentState,
+            notifications: [notification],
+            deps: deliveryDeps
           });
           const savedState = updated || item.currentState;
           await writeJobState(config.job.stateFilePath, item.stateKey, savedState,

@@ -14,6 +14,7 @@ const { lightPlugin } = require("./plugin");
 const CASES = Object.freeze({
   initial: { time: "12:00", description: "First schedule notification", seed: false },
   "schedule-change": { time: "12:00", description: "Changed schedule with a real Gemini summary", gemini: true },
+  "tomorrow-change": { time: "12:00", description: "Changed tomorrow schedule with a real Gemini summary", gemini: true },
   "off-reminder": { time: "16:50", description: "Light off at 17:00" },
   "on-reminder": { time: "17:50", description: "Light on at 18:00" },
   "tentative-on": { time: "17:50", description: "Light may come on at 18:00" },
@@ -50,6 +51,7 @@ function makeStates(caseName, key) {
   const today = current.days.today[key];
   const tomorrow = current.days.tomorrow[key];
   if (caseName === "schedule-change") today.fill(2, 40, 42);
+  if (caseName === "tomorrow-change") tomorrow.fill(2, 40, 42);
   if (["off-reminder", "schedule-and-off"].includes(caseName)) today.fill(2, 34, 36);
   if (["on-reminder", "tentative-on"].includes(caseName)) today.fill(2, 0, 36);
   if (caseName === "tentative-on") today.fill(3, 36);

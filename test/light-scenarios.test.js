@@ -47,6 +47,7 @@ test("Gemini cases require an API key before sending", async () => {
 for (const [caseName, time, expected, geminiCalls] of [
   ["initial", "12:00", /Графік світла/, 0],
   ["schedule-change", "12:00", /Змінився графік відключень/, 1],
+  ["tomorrow-change", "12:00", /завтра/, 1],
   ["off-reminder", "16:50", /Нагадування про відключення/, 0],
   ["on-reminder", "17:50", /Нагадування про появу світла/, 0],
   ["tentative-on", "17:50", /може зʼявитися/, 0],

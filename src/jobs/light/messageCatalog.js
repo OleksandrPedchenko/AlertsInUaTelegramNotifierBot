@@ -104,6 +104,27 @@ function buildLightNotification(currentState, previousState = null, options = {}
   return lines.join("\n");
 }
 
+function buildDayLightNotification(currentState, previousDay, day, options = {}) {
+  const dayLabel = day === "tomorrow" ? "Завтра" : "Сьогодні";
+  const currentDay = currentState[day];
+  const lines = [
+    `<b>Графік світла: ${escapeHtml(currentState.queue)}.${escapeHtml(currentState.subQueue)} черга — ${dayLabel.toLowerCase()}</b>`
+  ];
+  if (options.changeSummary) {
+    lines.push("", "<b>Що змінилось</b>", escapeHtml(options.changeSummary));
+  }
+  if (previousDay) {
+    lines.push("", `<b>Було — ${dayLabel}</b>`);
+    lines.push(...formatPeriods(dayLabel, previousDay.timePeriods, { markCurrent: false }));
+  }
+  lines.push("", `<b>Стало — ${dayLabel}</b>`);
+  lines.push(...formatPeriods(dayLabel, currentDay.timePeriods, { markCurrent: day === "today" }));
+  lines.push(`Разом: +${prettyTime(currentDay.totalTimeOn)} -${prettyTime(currentDay.totalTimeOff)}`);
+  if (currentState.updatedAt) lines.push("", `Оновлено на сайті: ${escapeHtml(currentState.updatedAt)}`);
+  lines.push("", `Джерело: ${escapeHtml(currentState.sourceUrl)}`);
+  return lines.join("\n");
+}
+
 function buildOutageReminderNotification(currentState, reminder) {
   return [
     `<b>Графік світла: ${escapeHtml(currentState.queue)}.${escapeHtml(currentState.subQueue)} черга</b>`,
@@ -118,6 +139,7 @@ module.exports = {
   buildOutageReminderNotification,
   buildScheduleDetails,
   buildLightNotification,
+  buildDayLightNotification,
   escapeHtml,
   formatOutageReminder,
   formatPeriod

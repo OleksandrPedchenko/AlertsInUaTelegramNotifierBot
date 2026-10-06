@@ -44,7 +44,7 @@ test("fan-out fetches POE once and batches changed queues into one Gemini call",
     if (String(url).includes("generativelanguage.googleapis.com")) {
       geminiCalls += 1;
       return Promise.resolve(createTextResponse(200, JSON.stringify({ candidates: [{ content: { parts: [{
-        text: JSON.stringify({ "5.1": "Зміна для 5.1", "2.2": "Зміна для 2.2", "3.1": "Зміна для 3.1" })
+        text: JSON.stringify({ "5.1:today": "Зміна для 5.1", "2.2:today": "Зміна для 2.2", "3.1:today": "Зміна для 3.1" })
       }] } }] })));
     }
     poeGets += 1;
@@ -84,6 +84,76 @@ test("fan-out fetches POE once and batches changed queues into one Gemini call",
     assert.equal(poeGets, 4);
     assert.equal(geminiCalls, 1);
     assert.equal(messages.length, 0);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
+});
+
+test("tomorrow-only changes get a separate tomorrow message", async () => {
+  const dir = await createTempDir();
+  const file = path.join(dir, "subscriptions.json");
+  await fs.writeFile(file, JSON.stringify({ subscriptions: [{ queue: 1, subQueue: 1, chatId: "chat-a" }] }));
+  const state = createDefaultState();
+  const server = createMockServer(state);
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const env = {
+    TG_BOT_TOKEN: "test-token", GEMINI_API_KEY: "test-gemini", LIGHT_SUBSCRIPTIONS_FILE: file,
+    LIGHT_POE_URL: `${base}/customs/dynamicgpv-info.php`,
+    LIGHT_STATE_FILE_PATH: path.join(dir, "state.json"),
+    LIGHT_LOCK_FILE_PATH: path.join(dir, "light.lock"),
+    LIGHT_GEMINI_MIN_INTERVAL_MINUTES: "0",
+    LIGHT_TG_HTTP_MAX_RETRIES: "0"
+  };
+  const messages = [];
+  const prompts = [];
+  let failTomorrow = false;
+  const fetchImpl = (url, options) => {
+    if (String(url).includes("generativelanguage.googleapis.com")) {
+      const prompt = JSON.parse(options.body).contents[0].parts[0].text;
+      prompts.push(prompt);
+      const summaries = { "1.1:today": "Сьогодні змінилось", "1.1:tomorrow": "Завтра змінилось" };
+      return Promise.resolve(createTextResponse(200, JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify(summaries) }] } }] })));
+    }
+    if (String(url).includes("api.telegram.org")) {
+      const message = JSON.parse(options.body);
+      messages.push(message);
+      const failed = failTomorrow && /Завтра змінилось/.test(message.text);
+      return Promise.resolve(createTextResponse(failed ? 403 : 200, JSON.stringify({ ok: !failed })));
+    }
+    return fetch(url, options);
+  };
+  try {
+    await runFanout(env, { fetchImpl, logger: createSilentLogger() });
+    messages.length = 0;
+    state.days.tomorrow["1.1"].fill(2, 34, 36);
+    await fetch(`${base}/api/state`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(state) });
+    await runFanout(env, { fetchImpl, logger: createSilentLogger() });
+    assert.equal(messages.length, 1);
+    assert.match(messages[0].text, /Завтра змінилось/);
+    assert.doesNotMatch(messages[0].text, /<b>Сьогодні<\/b>/);
+    assert.equal(prompts.length, 1);
+    assert.match(prompts[0], /"day":"tomorrow"/);
+
+    messages.length = 0;
+    state.days.today["1.1"].fill(2, 36, 38);
+    state.days.tomorrow["1.1"].fill(2, 38, 40);
+    await fetch(`${base}/api/state`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(state) });
+    failTomorrow = true;
+    await assert.rejects(runFanout(env, { fetchImpl, logger: createSilentLogger() }));
+    assert.equal(messages.length, 2);
+    assert.match(messages[0].text, /Сьогодні змінилось/);
+    assert.match(messages[1].text, /Завтра змінилось/);
+    assert.equal(prompts.length, 2);
+    assert.match(prompts[1], /"day":"today"/);
+    assert.match(prompts[1], /"day":"tomorrow"/);
+
+    messages.length = 0;
+    failTomorrow = false;
+    await runFanout(env, { fetchImpl, logger: createSilentLogger() });
+    assert.equal(messages.length, 1);
+    assert.match(messages[0].text, /Завтра/);
+    assert.doesNotMatch(messages[0].text, /Сьогодні змінилось/);
   } finally {
     await new Promise(resolve => server.close(resolve));
   }

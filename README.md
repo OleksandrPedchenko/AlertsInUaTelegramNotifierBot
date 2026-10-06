@@ -107,6 +107,8 @@ Copy `light-subscriptions.example.json` to `light-subscriptions.json`, edit its 
 
 `npm run start:light` remains the systemd command. With the subscriptions file configured, each run fetches the POE schedule once, evaluates each unique queue, and sends Telegram messages to the corresponding chats. Delivery state is saved per queue and chat. If one chat fails, other successful deliveries stay recorded, and only the failed chat retries on the next run. The first run in multi-group mode sends an initial schedule to every configured chat; the old single-queue state is not reused.
 
+After the initial schedule, today's and tomorrow's changes are compared by calendar date and sent as separate messages. A change only to tomorrow sends only the tomorrow message. If both days change, both messages are sent; a failed second message retries without resending the first.
+
 If Gemini is enabled, one batch request covers all changed queue schedules in that run, including queues followed by multiple chats. No Gemini call is made for unchanged schedules, reminders, or initial schedules without a previous version. Successful summaries are cached for the same schedule change and half-hour time slot. A failed or incomplete Gemini response falls back to the raw old/new schedule, with a 15-minute cooldown before another attempt for the same change. A rolling request budget defaults to at most one Gemini attempt every 5 minutes and 20 attempts per 24 hours; the cache keeps its 100 most recent entries. These safeguards reduce free-tier usage but cannot guarantee availability when the same Google project is used elsewhere.
 The batch makes no immediate retry after a Gemini error; `LIGHT_GEMINI_MAX_RETRIES` still applies to the legacy single-queue path.
 
@@ -118,6 +120,7 @@ Set `TG_BOT_TOKEN` and `LIGHT_TG_CHAT_ID` in `.env` to your **demo bot and group
 npm run test:light:live -- --list
 npm run test:light:live -- --case initial
 npm run test:light:live -- --case schedule-change
+npm run test:light:live -- --case tomorrow-change
 npm run test:light:live -- --case off-reminder --time 16:50
 npm run test:light:live -- --case on-reminder --time 17:50
 npm run test:light:live -- --case tentative-on --time 17:50

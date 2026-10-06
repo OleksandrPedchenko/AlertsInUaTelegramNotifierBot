@@ -11,7 +11,7 @@ const { writeJobState } = require("../src/lib/stateStore");
 const { loadLightConfig } = require("../src/jobs/light/config");
 const { createDefaultState, createMockServer, renderPoeHtml } = require("../src/jobs/light/mockServer");
 const { parseLightSchedule } = require("../src/jobs/light/parser");
-const { findPendingOutageReminder, lightPlugin } = require("../src/jobs/light/plugin");
+const { findPendingOutageReminder, getChangedDays, lightPlugin } = require("../src/jobs/light/plugin");
 const { createMemoryLogger, createSilentLogger, createTempDir, createTextResponse } = require("./helpers");
 
 function row(statuses) {
@@ -254,6 +254,14 @@ test("light reminders include tomorrow's midnight transition", () => {
   assert.equal(reminder.id, "2026-10-07:on:0-60");
 });
 
+test("day comparison follows calendar dates across midnight", () => {
+  const allOn = { timePeriods: [{ status: 1, time: "00:00 - 24:00", durationMinutes: 1440 }] };
+  const off = { timePeriods: [{ status: 2, time: "00:00 - 24:00", durationMinutes: 1440 }] };
+  const previous = { scheduleDate: "2026-10-06", today: off, tomorrow: allOn };
+  const current = { scheduleDate: "2026-10-07", today: allOn, tomorrow: off };
+  assert.deepEqual(getChangedDays(previous, current), ["tomorrow"]);
+});
+
 test("light runner skips notification when selected queue fingerprint is unchanged", async () => {
   const dir = await createTempDir();
   const html = createPoeHtml();
@@ -373,7 +381,7 @@ test("light runner sends Telegram notification when selected queue schedule chan
   assert.match(telegramBody.text, /Було/);
   assert.match(telegramBody.text, /Стало/);
   assert.match(telegramBody.text, /Сьогодні/);
-  assert.match(telegramBody.text, /Завтра/);
+  assert.doesNotMatch(telegramBody.text, /Завтра/);
   assert.deepEqual(
     logger.entries.find((entry) => entry.message === "Gemini change summary skipped")?.meta,
     {
@@ -404,6 +412,40 @@ test("light runner retries an unsent schedule change on the next run", async () 
   });
   assert.equal(retry.changed, true);
   assert.equal(sent, 1);
+});
+
+test("light runner retries only tomorrow when its second day message fails", async () => {
+  const dir = await createTempDir();
+  const oldHtml = createPoeHtml([1, 1, 1, 1], [1, 1, 1]);
+  const newHtml = createPoeHtml([2, 2, 1, 1], [1, 2, 1]);
+  const config = buildLightConfig(dir, { LIGHT_TG_HTTP_MAX_RETRIES: "0" });
+  const previousState = parseLightSchedule(oldHtml, 2, 2);
+  await writeJobState(config.job.stateFilePath, lightPlugin.getStateKey(config), previousState,
+    lightPlugin.getStateFingerprint(previousState));
+  const firstMessages = [];
+  await assert.rejects(runPluginJob(lightPlugin, {}, {
+    config, logger: createSilentLogger(),
+    fetchImpl: async (url, options) => {
+      if (String(url).includes("api.telegram.org")) {
+        const message = JSON.parse(options.body);
+        firstMessages.push(message.text);
+        const failed = firstMessages.length === 2;
+        return createTextResponse(failed ? 403 : 200, JSON.stringify({ ok: !failed }));
+      }
+      return createTextResponse(200, newHtml);
+    }
+  }));
+  assert.equal(firstMessages.length, 2);
+  assert.match(firstMessages[0], /сьогодні/);
+  assert.match(firstMessages[1], /завтра/);
+  const retried = [];
+  await runPluginJob(lightPlugin, {}, {
+    config, logger: createSilentLogger(),
+    fetchImpl: createLightFetch(newHtml, body => retried.push(body.text))
+  });
+  assert.equal(retried.length, 1);
+  assert.match(retried[0], /завтра/);
+  assert.doesNotMatch(retried[0], /<b>Сьогодні<\/b>/);
 });
 
 test("light runner sends schedule change and outage reminder as separate messages", async () => {

@@ -4,7 +4,7 @@ const { readFile } = require("fs/promises");
 const { HttpRequestError } = require("../../lib/httpClient");
 const { loadLightConfig } = require("./config");
 const { describeLightScheduleChange } = require("./geminiClient");
-const { buildLightNotification, buildOutageReminderNotification } = require("./messageCatalog");
+const { buildDayLightNotification, buildLightNotification, buildOutageReminderNotification } = require("./messageCatalog");
 const { parseLightSchedule } = require("./parser");
 
 async function fetchPoeData(config, deps) {
@@ -89,6 +89,29 @@ function followingDate(date) {
   const value = new Date(`${date}T00:00:00Z`);
   value.setUTCDate(value.getUTCDate() + 1);
   return value.toISOString().slice(0, 10);
+}
+
+function dayFingerprint(schedule) {
+  return JSON.stringify(schedule?.timePeriods?.map(({ status, time, durationMinutes }) => ({
+    status, time, durationMinutes
+  })) || []);
+}
+
+function previousScheduleForDay(previousState, currentState, day) {
+  if (!previousState) return null;
+  if (!previousState.scheduleDate || !currentState.scheduleDate) return previousState[day] || null;
+  const targetDate = day === "today" ? currentState.scheduleDate : followingDate(currentState.scheduleDate);
+  if (targetDate === previousState.scheduleDate) return previousState.today || null;
+  if (targetDate === followingDate(previousState.scheduleDate)) return previousState.tomorrow || null;
+  return null;
+}
+
+function getChangedDays(previousState, currentState) {
+  if (!previousState) return [];
+  return ["today", "tomorrow"].filter(day =>
+    dayFingerprint(previousScheduleForDay(previousState, currentState, day)) !==
+    dayFingerprint(currentState[day])
+  );
 }
 
 function findPendingOutageReminder({ currentState, previousState, thresholdMinutes }) {
@@ -227,28 +250,30 @@ const lightPlugin = {
     return JSON.stringify(normalizeScheduleForFingerprint(state));
   },
 
-  shouldNotify({ changed, config, currentState }) {
-    return changed || config.job.alwaysSendTgMessage || Boolean(currentState.pendingOutageReminder);
+  shouldNotify({ previousState, config, currentState }) {
+    return !previousState || getChangedDays(previousState, currentState).length > 0 ||
+      config.job.alwaysSendTgMessage || Boolean(currentState.pendingOutageReminder);
   },
 
   async buildNotification({ previousState, currentState, changed, config, deps }) {
-    let changeSummary = "";
+    const changedDays = getChangedDays(previousState, currentState);
+    const summaries = { ...(deps.changeSummaries || {}) };
     const notifications = [];
 
-    if (!changed) {
-      deps.logger.info("Gemini change summary skipped", {
-        reason: "schedule-unchanged",
-        queue: currentState.queue,
-        subQueue: currentState.subQueue
-      });
-    } else if (!previousState) {
+    if (!previousState) {
       deps.logger.info("Gemini change summary skipped", {
         reason: "missing-previous-state",
         queue: currentState.queue,
         subQueue: currentState.subQueue
       });
-    } else if (deps.changeSummary !== undefined) {
-      changeSummary = deps.changeSummary;
+    } else if (changedDays.length === 0) {
+      deps.logger.info("Gemini change summary skipped", {
+        reason: "schedule-unchanged",
+        queue: currentState.queue,
+        subQueue: currentState.subQueue
+      });
+    } else if (deps.changeSummaries !== undefined) {
+      // A fan-out run already made its single Gemini batch request.
     } else if (!config.gemini.enabled) {
       deps.logger.info("Gemini change summary skipped", {
         reason: "disabled",
@@ -269,19 +294,25 @@ const lightPlugin = {
           currentTomorrowPeriods: currentState.tomorrow.timePeriods.length
         });
 
-        changeSummary = await describeLightScheduleChange(
+        const firstDay = changedDays[0];
+        const priorForPrompt = {
+          ...previousState,
+          today: previousScheduleForDay(previousState, currentState, "today") || { timePeriods: [] },
+          tomorrow: previousScheduleForDay(previousState, currentState, "tomorrow") || { timePeriods: [] }
+        };
+        summaries[firstDay] = await describeLightScheduleChange(
           config.gemini,
-          previousState,
+          priorForPrompt,
           currentState,
           deps
         );
 
-        if (changeSummary) {
+        if (summaries[firstDay]) {
           deps.logger.info("Gemini change summary generated", {
             model: config.gemini.model,
             queue: currentState.queue,
             subQueue: currentState.subQueue,
-            length: changeSummary.length
+            length: summaries[firstDay].length
           });
         } else {
           deps.logger.warn("Gemini change summary response was empty", {
@@ -302,13 +333,23 @@ const lightPlugin = {
       }
     }
 
-    if (changed || config.job.alwaysSendTgMessage) {
+    if (!previousState || (changedDays.length === 0 && config.job.alwaysSendTgMessage)) {
       notifications.push({
         type: "schedule-change",
-        text: buildLightNotification(currentState, changed ? previousState : null, {
-          changeSummary
-        })
+        text: buildLightNotification(currentState)
       });
+    } else {
+      for (const day of changedDays) {
+        notifications.push({
+          type: `schedule-change:${day}`,
+          text: buildDayLightNotification(
+            currentState,
+            previousScheduleForDay(previousState, currentState, day),
+            day,
+            { changeSummary: summaries[day] }
+          )
+        });
+      }
     }
 
     if (currentState.pendingOutageReminder) {
@@ -321,7 +362,23 @@ const lightPlugin = {
     return notifications;
   },
 
-  async afterNotificationSuccess({ currentState, notifications }) {
+  async afterNotificationSuccess({ previousState, currentState, notifications, deps }) {
+    const sentDay = notifications[0]?.type?.split(":")[1];
+    if (sentDay && previousState) {
+      const sentDays = deps.sentScheduleDays || new Set();
+      sentDays.add(sentDay);
+      deps.sentScheduleDays = sentDays;
+      const unsentDays = getChangedDays(previousState, currentState).filter(day => !sentDays.has(day));
+      if (unsentDays.length > 0) {
+        const saved = { ...currentState };
+        for (const day of unsentDays) {
+          saved[day] = previousScheduleForDay(previousState, currentState, day) || {
+            timePeriods: [], totalTimeOn: 0, totalTimeOff: 0
+          };
+        }
+        return saved;
+      }
+    }
     const reminderSent = notifications.some(
       (notification) => notification.type === "outage-reminder"
     );
@@ -336,6 +393,9 @@ const lightPlugin = {
 
 module.exports = {
   buildCurrentLightState,
+  dayFingerprint,
+  getChangedDays,
+  previousScheduleForDay,
   fetchPoeData,
   buildOutageReminderId,
   dateFromCurrentMinute,
