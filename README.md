@@ -120,6 +120,16 @@ npm run test:light:live -- --case schedule-and-off --time 16:50
 
 `--time HH:MM` sets the worker's current local clock time for the run. Each case has a default time shown by `--list`; `--lead N` changes the reminder window from the default 10 minutes. `--queue 1..6` and `--subqueue 1..2` select the queue shown in the message (defaults `5.1`). A reminder sends only if its transition falls after the selected time and within the lead window. `schedule-and-off` sends two messages. Each command starts a temporary local POE mock server, fetches its GET and POST endpoints, and uses isolated state, so it does not change the mock builder at `127.0.0.1:3010` or the worker's saved state. The temporary mock URL in the message stops working when the command ends.
 
+To fetch the **real POE schedule** and emulate the current local time, use:
+
+```sh
+npm run test:light:poe -- --time 16:50
+npm run test:light:poe -- --time 17:50 --queue 5 --subqueue 1 --lead 20
+npm run test:light:poe -- --time 23:50 --always
+```
+
+This command always calls the official POE GET and POST endpoints, even if `.env` points the regular worker at localhost. It sends real Telegram messages to `LIGHT_TG_CHAT_ID` (or `TG_CHAT_ID`). It keeps its own state in `.light-poe-test-state.json`, so the first run sends the current schedule and later runs send only changes or reminders within `--lead` minutes. `--always` also sends the schedule when it is unchanged. Choose a time just before a transition in the **actual POE schedule** to trigger a reminder; the examples alone do not guarantee one. With a Gemini API key configured, a later changed schedule makes a real Gemini request. The emulated time uses today's local date.
+
 ## Cron Setup (Every N Minutes)
 
 Use system cron to execute this one-shot script every `N` minutes.

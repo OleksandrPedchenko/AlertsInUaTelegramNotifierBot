@@ -9,6 +9,7 @@
     "start:light": "node src/jobs/light/index.js",
     "start:light:mock": "node src/jobs/light/mockServer.js",
     "test:light:live": "node src/jobs/light/scenarios.js",
+    "test:light:poe": "node src/jobs/light/realPoe.js",
     "test": "node --test"
   },
   "keywords": [

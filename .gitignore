@@ -7,3 +7,5 @@ logs/
 .alerts-last-state.json
 .light-job.lock
 .light-last-state.json
+.light-poe-test.lock
+.light-poe-test-state.json
