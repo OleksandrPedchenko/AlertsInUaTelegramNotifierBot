@@ -99,10 +99,16 @@ function readGeminiConfig(readers) {
       min: 0,
       max: 2
     }),
-    maxOutputTokens: readers.readNumber("LIGHT_GEMINI_MAX_OUTPUT_TOKENS", 512, {
+    maxOutputTokens: readers.readNumber("LIGHT_GEMINI_MAX_OUTPUT_TOKENS", 1024, {
       integer: true,
       min: 32,
       max: 4096
+    }),
+    minIntervalMinutes: readers.readNumber("LIGHT_GEMINI_MIN_INTERVAL_MINUTES", 5, {
+      integer: true, min: 0, max: 1440
+    }),
+    maxDailyRequests: readers.readNumber("LIGHT_GEMINI_MAX_DAILY_REQUESTS", 20, {
+      integer: true, min: 0, max: 10000
     })
   };
 }
@@ -127,6 +133,8 @@ function readLokiConfig(readers) {
 }
 
 function loadLightConfig(_env, readers) {
+  const subscriptionsFilePath = readers.readOptionalString("LIGHT_SUBSCRIPTIONS_FILE")
+    ? readers.readResolvedPath("LIGHT_SUBSCRIPTIONS_FILE") : null;
   const useStub = readers.readBoolean("LIGHT_USE_STUB", false);
   const currentMinute =
     readers.env.LIGHT_CURRENT_MINUTE === undefined || readers.env.LIGHT_CURRENT_MINUTE === ""
@@ -174,7 +182,8 @@ function loadLightConfig(_env, readers) {
     },
     telegram: {
       botToken: readers.readRequiredString("TG_BOT_TOKEN"),
-      chatId: readRequiredStringFromKeys(readers, ["LIGHT_TG_CHAT_ID", "TG_CHAT_ID"]),
+      chatId: subscriptionsFilePath ? readOptionalStringFromKeys(readers, ["LIGHT_TG_CHAT_ID", "TG_CHAT_ID"])
+        : readRequiredStringFromKeys(readers, ["LIGHT_TG_CHAT_ID", "TG_CHAT_ID"]),
       timeoutMs: readNumberFromKeys(
         readers,
         ["LIGHT_TG_HTTP_TIMEOUT_MS", "TG_HTTP_TIMEOUT_MS"],
@@ -206,6 +215,7 @@ function loadLightConfig(_env, readers) {
       )
     },
     job: {
+      subscriptionsFilePath,
       lockFilePath: readers.readResolvedPath("LIGHT_LOCK_FILE_PATH", ".light-job.lock"),
       stateFilePath: readers.readResolvedPath("LIGHT_STATE_FILE_PATH", ".light-last-state.json"),
       stubFilePath: readers.readResolvedPath("LIGHT_STUB_FILE", "light-example.html"),

@@ -147,6 +147,26 @@ function markOutageReminderSent(currentState) {
   };
 }
 
+function buildCurrentLightState(schedule, config, previousState, response) {
+  const currentMinute = Number.isInteger(config.job.currentMinute)
+    ? config.job.currentMinute : getCurrentMinute();
+  const currentState = {
+    ...schedule,
+    sourceUrl: config.poe.url,
+    source: config.job.useStub ? "stub" : "poe",
+    currentMinute,
+    scheduleDate: getLocalDate(),
+    responseStatus: response.getStatus,
+    outageReminders: { sentIds: getSentOutageReminderIds(previousState) }
+  };
+  currentState.pendingOutageReminder = findPendingOutageReminder({
+    currentState,
+    previousState,
+    thresholdMinutes: config.job.outageReminderBeforeMinutes
+  });
+  return currentState;
+}
+
 const lightPlugin = {
   name: "light",
 
@@ -183,28 +203,11 @@ const lightPlugin = {
     }
 
     const currentMinute = Number.isInteger(config.job.currentMinute)
-      ? config.job.currentMinute
-      : getCurrentMinute();
+      ? config.job.currentMinute : getCurrentMinute();
     const schedule = parseLightSchedule(response.html, config.poe.queue, config.poe.subQueue, {
       now: dateFromCurrentMinute(currentMinute)
     });
-
-    const currentState = {
-      ...schedule,
-      sourceUrl: config.poe.url,
-      source: config.job.useStub ? "stub" : "poe",
-      currentMinute,
-      scheduleDate: getLocalDate(),
-      responseStatus: response.getStatus,
-      outageReminders: {
-        sentIds: getSentOutageReminderIds(deps.previousState)
-      }
-    };
-    currentState.pendingOutageReminder = findPendingOutageReminder({
-      currentState,
-      previousState: deps.previousState,
-      thresholdMinutes: config.job.outageReminderBeforeMinutes
-    });
+    const currentState = buildCurrentLightState(schedule, config, deps.previousState, response);
 
     deps.logger.info("Light data fetched successfully", {
       queue: config.poe.queue,
@@ -244,6 +247,8 @@ const lightPlugin = {
         queue: currentState.queue,
         subQueue: currentState.subQueue
       });
+    } else if (deps.changeSummary !== undefined) {
+      changeSummary = deps.changeSummary;
     } else if (!config.gemini.enabled) {
       deps.logger.info("Gemini change summary skipped", {
         reason: "disabled",
@@ -330,6 +335,8 @@ const lightPlugin = {
 };
 
 module.exports = {
+  buildCurrentLightState,
+  fetchPoeData,
   buildOutageReminderId,
   dateFromCurrentMinute,
   findPendingOutageReminder,

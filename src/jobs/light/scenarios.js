@@ -86,6 +86,7 @@ async function runScenario({ caseName, time, queue = 5, subQueue = 1, leadMinute
     const baseUrl = `http://127.0.0.1:${server.address().port}`;
     const scenarioEnv = {
       ...env,
+      LIGHT_SUBSCRIPTIONS_FILE: "",
       LIGHT_QUEUE: String(selectedQueue),
       LIGHT_SUB_QUEUE: String(selectedSubQueue),
       LIGHT_POE_URL: `${baseUrl}/customs/dynamicgpv-info.php`,

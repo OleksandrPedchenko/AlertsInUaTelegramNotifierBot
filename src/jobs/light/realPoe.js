@@ -38,6 +38,7 @@ async function runRealPoe({ time, queue = 5, subQueue = 1, leadMinutes = 10, alw
   const selectedLead = parseNumber(leadMinutes, "lead", 0, 1440);
   const realEnv = {
     ...env,
+    LIGHT_SUBSCRIPTIONS_FILE: "",
     LIGHT_POE_URL: DEFAULT_POE_URL,
     LIGHT_USE_STUB: "false",
     LIGHT_QUEUE: String(selectedQueue),

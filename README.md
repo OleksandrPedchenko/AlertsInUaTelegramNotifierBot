@@ -77,6 +77,7 @@ One-shot Node.js job that fetches active air raid alert state for a region and t
 - `LIGHT_QUEUE` (optional): queue number, `1..6`. Falls back to xbar-style `VAR_QUEUE`, then `5`.
 - `LIGHT_SUB_QUEUE` (optional): subqueue number, `1..2`. Falls back to xbar-style `VAR_SUB_QUEUE`, then `1`.
 - `LIGHT_TG_CHAT_ID` (optional): Telegram chat/channel for light notifications. Falls back to `TG_CHAT_ID`.
+- `LIGHT_SUBSCRIPTIONS_FILE` (optional): path to a JSON file with queue/subqueue/chat subscriptions. When set, the light job fetches POE once and processes every subscription; `LIGHT_QUEUE`, `LIGHT_SUB_QUEUE`, and `LIGHT_TG_CHAT_ID` are used only by the single-queue mode and test commands.
 - `LIGHT_POE_URL` (optional): POE HTML schedule URL. Default `https://www.poe.pl.ua/customs/dynamicgpv-info.php`. Plain HTTP is accepted only for localhost mock URLs.
 - `LIGHT_MOCK_HOST` / `LIGHT_MOCK_PORT` (optional): host and port for `npm run start:light:mock`. Defaults to `127.0.0.1:3010`.
 - `LIGHT_USE_STUB` (optional): if `true`, skips the POE GET request and reads HTML from `LIGHT_STUB_FILE`. Default `false`.
@@ -87,6 +88,7 @@ One-shot Node.js job that fetches active air raid alert state for a region and t
 - `LIGHT_GEMINI_API_BASE_URL` (optional): default `https://generativelanguage.googleapis.com/v1beta`.
 - `LIGHT_GEMINI_TIMEOUT_MS`, `LIGHT_GEMINI_MAX_RETRIES`, `LIGHT_GEMINI_RETRY_BASE_DELAY_MS` (optional): Gemini request retry settings.
 - `LIGHT_GEMINI_TEMPERATURE`, `LIGHT_GEMINI_MAX_OUTPUT_TOKENS` (optional): Gemini generation settings.
+- `LIGHT_GEMINI_MIN_INTERVAL_MINUTES`, `LIGHT_GEMINI_MAX_DAILY_REQUESTS` (optional): multi-group Gemini request budget. Defaults to at most one request every 5 minutes and 20 requests in any rolling 24 hours. When the budget is reached, notifications still send with raw old/new schedules.
 - `LIGHT_HTTP_TIMEOUT_MS`, `LIGHT_HTTP_MAX_RETRIES`, `LIGHT_HTTP_RETRY_BASE_DELAY_MS` (optional): light job HTTP retry settings; fall back to shared `HTTP_*` values.
 - `LIGHT_TG_HTTP_TIMEOUT_MS`, `LIGHT_TG_HTTP_MAX_RETRIES`, `LIGHT_TG_HTTP_RETRY_BASE_DELAY_MS` (optional): light Telegram retry settings; fall back to shared `TG_HTTP_*` values.
 - `LIGHT_LOCK_FILE_PATH` (optional): default `.light-job.lock`.
@@ -98,6 +100,15 @@ One-shot Node.js job that fetches active air raid alert state for a region and t
 ### Local POE mock
 
 `npm run start:light:mock` serves a horizontally scrolling 48-cell schedule builder for today and tomorrow, queues `1–6`, and subqueues `1–2`. Builder edits save automatically. The raw editor can replace exactly the HTML returned by `GET /customs/dynamicgpv-info.php`; “Load generated” copies the current builder output into the editor, and “Use schedule builder” switches the endpoint back to generated HTML. The mock still supports `POST /customs/search-disconnection.php` for compatibility, but the light worker does not call it. Changes take effect without restarting the server.
+
+### Multiple queues and Telegram groups
+
+Copy `light-subscriptions.example.json` to `light-subscriptions.json`, edit its entries, and set `LIGHT_SUBSCRIPTIONS_FILE=light-subscriptions.json` in `.env` or the light systemd service. Each entry has an integer `queue` (1–6), integer `subQueue` (1–2), and a string `chatId`. The same queue may appear for several chats; an identical queue/subqueue/chat entry is rejected. Keep `TG_BOT_TOKEN` in `.env`, not the JSON file. The local `light-subscriptions.json` file is ignored by Git.
+
+`npm run start:light` remains the systemd command. With the subscriptions file configured, each run fetches the POE schedule once, evaluates each unique queue, and sends Telegram messages to the corresponding chats. Delivery state is saved per queue and chat. If one chat fails, other successful deliveries stay recorded, and only the failed chat retries on the next run. The first run in multi-group mode sends an initial schedule to every configured chat; the old single-queue state is not reused.
+
+If Gemini is enabled, one batch request covers all changed queue schedules in that run, including queues followed by multiple chats. No Gemini call is made for unchanged schedules, reminders, or initial schedules without a previous version. Successful summaries are cached for the same schedule change and half-hour time slot. A failed or incomplete Gemini response falls back to the raw old/new schedule, with a 15-minute cooldown before another attempt for the same change. A rolling request budget defaults to at most one Gemini attempt every 5 minutes and 20 attempts per 24 hours; the cache keeps its 100 most recent entries. These safeguards reduce free-tier usage but cannot guarantee availability when the same Google project is used elsewhere.
+The batch makes no immediate retry after a Gemini error; `LIGHT_GEMINI_MAX_RETRIES` still applies to the legacy single-queue path.
 
 ### Live light notification scenarios
 
@@ -147,7 +158,7 @@ Example light job every minute:
 
 - `src/lib/`: shared one-shot job runner, lock, logger, config readers, HTTP retry client, Telegram sender, and keyed JSON state store.
 - `src/jobs/alerts/`: alert-specific config, API parsing, state fingerprinting, and Telegram message text.
-- `src/jobs/light/`: POE queue/subqueue schedule job. Its state key is the configured `LIGHT_QUEUE` + `LIGHT_SUB_QUEUE`.
+- `src/jobs/light/`: POE schedule job. Single-queue mode uses the configured queue/subqueue; multi-group mode uses a subscriptions JSON file and per-chat delivery state.
 
 ## Notes
 

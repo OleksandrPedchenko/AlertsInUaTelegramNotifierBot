@@ -1,0 +1,6 @@
+{
+  "subscriptions": [
+    { "queue": 5, "subQueue": 1, "chatId": "-1001234567890" },
+    { "queue": 2, "subQueue": 2, "chatId": "-1009876543210" }
+  ]
+}

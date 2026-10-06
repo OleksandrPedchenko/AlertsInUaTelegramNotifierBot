@@ -1,0 +1,262 @@
+"use strict";
+
+const { createHash } = require("node:crypto");
+const { readFile } = require("node:fs/promises");
+const { createEnvReader } = require("../../lib/config");
+const { requestWithRetry } = require("../../lib/httpClient");
+const { acquireRunLock } = require("../../lib/lock");
+const { createLogger } = require("../../lib/logger");
+const { normalizeNotifications } = require("../../lib/runner");
+const { readJobState, writeJobState } = require("../../lib/stateStore");
+const { sendTelegramMessage } = require("../../lib/telegramNotifier");
+const { loadLightConfig } = require("./config");
+const { buildGeminiUrl, extractGeminiText, normalizeSegmentsForGemini } = require("./geminiClient");
+const { parseLightSchedule } = require("./parser");
+const { buildCurrentLightState, dateFromCurrentMinute, fetchPoeData, getCurrentMinute, lightPlugin, readStubData } = require("./plugin");
+
+async function loadSubscriptions(filePath) {
+  let data;
+  try {
+    data = JSON.parse(await readFile(filePath, "utf8"));
+  } catch (error) {
+    throw new Error(`Cannot read light subscriptions at ${filePath}: ${error.message}`);
+  }
+  if (!data || !Array.isArray(data.subscriptions) || data.subscriptions.length === 0) {
+    throw new Error("Light subscriptions JSON needs a non-empty subscriptions array");
+  }
+  const seen = new Set();
+  return data.subscriptions.map((item, index) => {
+    const queue = item?.queue;
+    const subQueue = item?.subQueue;
+    const chatId = typeof item?.chatId === "string" ? item.chatId.trim() : "";
+    if (!Number.isInteger(queue) || queue < 1 || queue > 6) {
+      throw new Error(`Subscription ${index + 1}: queue must be an integer from 1 to 6`);
+    }
+    if (!Number.isInteger(subQueue) || subQueue < 1 || subQueue > 2) {
+      throw new Error(`Subscription ${index + 1}: subQueue must be 1 or 2`);
+    }
+    if (!chatId) throw new Error(`Subscription ${index + 1}: chatId is required`);
+    const key = `${queue}.${subQueue}:${chatId}`;
+    if (seen.has(key)) throw new Error(`Duplicate subscription: ${key}`);
+    seen.add(key);
+    return { queue, subQueue, chatId };
+  });
+}
+
+function changeCacheKey(item) {
+  const oldFingerprint = lightPlugin.getStateFingerprint(item.previousState);
+  const timeSlot = Math.floor(item.currentState.currentMinute / 30);
+  const digest = createHash("sha256").update(`${item.currentState.scheduleDate}:${timeSlot}\n${oldFingerprint}\n${item.fingerprint}`).digest("hex");
+  return `light:gemini:${item.queueKey}:${digest}`;
+}
+
+function batchPrompt(items) {
+  const changes = items.map(item => ({
+    id: item.batchId,
+    currentMinute: item.currentState.currentMinute,
+    today: {
+      old: normalizeSegmentsForGemini(item.previousState, "today"),
+      now: normalizeSegmentsForGemini(item.currentState, "today")
+    },
+    tomorrow: {
+      old: normalizeSegmentsForGemini(item.previousState, "tomorrow"),
+      now: normalizeSegmentsForGemini(item.currentState, "tomorrow")
+    }
+  }));
+  return [
+    "Поясни українською зміни графіка світла окремо для кожного id.",
+    "Стани: 1=світло є, 2=немає, 3=перехідний період після відключення.",
+    "Описуй зміни відключень (стан 2), не вигадуй причини чи поради.",
+    "Для сьогодні ігноруй зміни, що повністю минули до currentMinute; для завтра аналізуй всю добу.",
+    "Відповідь: JSON object, де ключ — точний id, значення — короткий текст про зміни.",
+    JSON.stringify(changes)
+  ].join("\n");
+}
+
+async function describeBatch(config, items, deps) {
+  const response = await requestWithRetry({
+    method: "POST",
+    url: buildGeminiUrl(config),
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({
+      contents: [{ role: "user", parts: [{ text: batchPrompt(items) }] }],
+      generationConfig: {
+        temperature: config.temperature,
+        maxOutputTokens: config.maxOutputTokens,
+        responseMimeType: "application/json"
+      }
+    }),
+    timeoutMs: config.timeoutMs,
+    maxRetries: 0,
+    retryBaseDelayMs: config.retryBaseDelayMs,
+    responseType: "json",
+    fetchImpl: deps.fetchImpl,
+    logger: deps.logger
+  });
+  const parsed = JSON.parse(extractGeminiText(response.body));
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Gemini batch response must be a JSON object");
+  }
+  return parsed;
+}
+
+async function prepareGeminiSummaries(items, config, deps) {
+  const summaries = new Map();
+  if (!config.gemini.enabled) return summaries;
+  const cacheKey = "light:gemini-cache";
+  const cache = { ...((await readJobState(config.job.stateFilePath, cacheKey))?.state?.entries || {}) };
+  const unique = new Map();
+  for (const item of items) {
+    if (!item.changed || !item.previousState) continue;
+    const key = changeCacheKey(item);
+    item.changeCacheKey = key;
+    if (!unique.has(key)) unique.set(key, item);
+  }
+  const missing = [];
+  for (const [key, item] of unique) {
+    const cached = cache[key];
+    if (typeof cached?.summary === "string") {
+      summaries.set(key, cached.summary);
+    } else if (!cached?.retryAfter || Date.now() >= cached.retryAfter) {
+      item.batchId = item.queueKey;
+      if (missing.some(other => other.batchId === item.batchId)) item.batchId = `${item.queueKey}#${missing.length + 1}`;
+      missing.push(item);
+    }
+  }
+  if (missing.length === 0) return summaries;
+  const now = Date.now();
+  const controlKey = "light:gemini-control";
+  const previousAttempts = (await readJobState(config.job.stateFilePath, controlKey))?.state?.attempts;
+  const attempts = (Array.isArray(previousAttempts) ? previousAttempts : [])
+    .filter(value => Number.isFinite(value) && value > now - 24 * 60 * 60 * 1000);
+  if (attempts.length >= config.gemini.maxDailyRequests ||
+      (attempts.length > 0 && now - attempts.at(-1) < config.gemini.minIntervalMinutes * 60 * 1000)) {
+    deps.logger.info("Gemini batch skipped by request budget", {
+      attemptsLast24Hours: attempts.length,
+      minIntervalMinutes: config.gemini.minIntervalMinutes,
+      maxDailyRequests: config.gemini.maxDailyRequests
+    });
+    return summaries;
+  }
+  attempts.push(now);
+  await writeJobState(config.job.stateFilePath, controlKey, { attempts }, "v1");
+  try {
+    deps.logger.info("Requesting Gemini summaries for changed queues", { count: missing.length });
+    const response = await describeBatch(config.gemini, missing, deps);
+    for (const item of missing) {
+      const summary = response[item.batchId];
+      if (typeof summary !== "string" || !summary.trim()) {
+        cache[item.changeCacheKey] = { retryAfter: now + 15 * 60 * 1000, savedAt: now };
+        continue;
+      }
+      const clean = summary.trim();
+      summaries.set(item.changeCacheKey, clean);
+      cache[item.changeCacheKey] = { summary: clean, savedAt: now };
+    }
+  } catch (error) {
+    deps.logger.warn("Gemini batch failed; using raw schedules", { reason: error.message, status: error.status });
+    const retryAfter = now + 15 * 60 * 1000;
+    for (const item of missing) {
+      cache[item.changeCacheKey] = { retryAfter, savedAt: now };
+    }
+  }
+  const entries = Object.fromEntries(Object.entries(cache)
+    .sort(([, left], [, right]) => (left.savedAt || 0) - (right.savedAt || 0))
+    .slice(-100));
+  await writeJobState(config.job.stateFilePath, cacheKey, { entries }, "v1");
+  return summaries;
+}
+
+async function runFanout(env = process.env, options = {}) {
+  const cwd = options.cwd || process.cwd();
+  const config = options.config || loadLightConfig(env, createEnvReader(env, { cwd }));
+  if (!config.job.subscriptionsFilePath) throw new Error("LIGHT_SUBSCRIPTIONS_FILE is required for fan-out");
+  const subscriptions = await loadSubscriptions(config.job.subscriptionsFilePath);
+  const ownsLogger = !options.logger;
+  const logger = options.logger || createLogger({ cwd, fetchImpl: options.fetchImpl, ...config.log });
+  const release = await acquireRunLock(config.job.lockFilePath);
+  if (!release) return { skipped: true };
+  try {
+    logger.info("Starting light fan-out", { jobName: "light", subscriptions: subscriptions.length });
+    const deps = { logger, requestWithRetry, fetchImpl: options.fetchImpl };
+    const response = config.job.useStub ? await readStubData(config) : await fetchPoeData(config, deps);
+    logger.info("POE schedule fetched", { jobName: "light", responseStatus: response.getStatus });
+    const currentMinute = Number.isInteger(config.job.currentMinute)
+      ? config.job.currentMinute : getCurrentMinute();
+    const schedules = new Map();
+    for (const { queue, subQueue } of subscriptions) {
+      const queueKey = `${queue}.${subQueue}`;
+      if (!schedules.has(queueKey)) {
+        schedules.set(queueKey, parseLightSchedule(response.html, queue, subQueue, {
+          now: dateFromCurrentMinute(currentMinute)
+        }));
+      }
+    }
+    const items = [];
+    for (const subscription of subscriptions) {
+      const queueKey = `${subscription.queue}.${subscription.subQueue}`;
+      const stateKey = `light:${queueKey}:chat:${subscription.chatId}`;
+      const previousRecord = await readJobState(config.job.stateFilePath, stateKey);
+      const previousState = previousRecord?.state || null;
+      const subscriberConfig = {
+        ...config,
+        poe: { ...config.poe, queue: subscription.queue, subQueue: subscription.subQueue },
+        telegram: { ...config.telegram, chatId: subscription.chatId }
+      };
+      const currentState = buildCurrentLightState(schedules.get(queueKey), subscriberConfig, previousState, response);
+      const fingerprint = lightPlugin.getStateFingerprint(currentState);
+      const previousFingerprint = previousRecord?.fingerprint ||
+        (previousState && lightPlugin.getStateFingerprint(previousState));
+      const changed = previousFingerprint !== fingerprint;
+      items.push({ queueKey, stateKey, previousState, previousRecord, currentState,
+        fingerprint, changed, config: subscriberConfig });
+    }
+    const summaries = await prepareGeminiSummaries(items, config, deps);
+    const failures = [];
+    let notificationCount = 0;
+    const lastSentAt = new Map();
+    for (const item of items) {
+      try {
+        if (!lightPlugin.shouldNotify({ changed: item.changed, config: item.config, currentState: item.currentState })) {
+          await writeJobState(config.job.stateFilePath, item.stateKey, item.currentState, item.fingerprint);
+          continue;
+        }
+        const notifications = normalizeNotifications(await lightPlugin.buildNotification({
+          previousState: item.previousState,
+          currentState: item.currentState,
+          changed: item.changed,
+          config: item.config,
+          deps: { ...deps, changeSummary: summaries.get(item.changeCacheKey) || "" }
+        }));
+        for (const notification of notifications) {
+          const chatId = item.config.telegram.chatId;
+          const waitMs = 1100 - (Date.now() - (lastSentAt.get(chatId) || 0));
+          if (waitMs > 0) await new Promise(resolve => setTimeout(resolve, waitMs));
+          await sendTelegramMessage(notification.text, item.config.telegram, deps);
+          lastSentAt.set(chatId, Date.now());
+          notificationCount += 1;
+          logger.info("Light notification delivered", {
+            jobName: "light", queue: item.queueKey, chatId, type: notification.type
+          });
+          const updated = await lightPlugin.afterNotificationSuccess({
+            currentState: item.currentState, notifications: [notification]
+          });
+          const savedState = updated || item.currentState;
+          await writeJobState(config.job.stateFilePath, item.stateKey, savedState,
+            lightPlugin.getStateFingerprint(savedState));
+        }
+      } catch (error) {
+        failures.push(item.stateKey);
+        logger.error("Light subscription failed", { jobName: "light", stateKey: item.stateKey, error });
+      }
+    }
+    logger.info("Light fan-out completed", { jobName: "light", subscriptions: items.length, notificationCount, failures: failures.length });
+    if (failures.length) throw new Error(`Failed light subscriptions: ${failures.join(", ")}`);
+    return { skipped: false, subscriptions: items.length, notificationCount };
+  } finally {
+    await release();
+    if (ownsLogger) await logger.flush?.();
+  }
+}
+
+module.exports = { loadSubscriptions, runFanout };
