@@ -106,6 +106,10 @@ function previousScheduleForDay(previousState, currentState, day) {
   return null;
 }
 
+function hasPublishedSchedule(day) {
+  return Boolean(day?.timePeriods?.length);
+}
+
 function getChangedDays(previousState, currentState) {
   if (!previousState) return [];
   return ["today", "tomorrow"].filter(day =>
@@ -257,6 +261,9 @@ const lightPlugin = {
 
   async buildNotification({ previousState, currentState, changed, config, deps }) {
     const changedDays = getChangedDays(previousState, currentState);
+    const revisedDays = changedDays.filter(day =>
+      hasPublishedSchedule(previousScheduleForDay(previousState, currentState, day))
+    );
     const summaries = { ...(deps.changeSummaries || {}) };
     const notifications = [];
 
@@ -269,6 +276,12 @@ const lightPlugin = {
     } else if (changedDays.length === 0) {
       deps.logger.info("Gemini change summary skipped", {
         reason: "schedule-unchanged",
+        queue: currentState.queue,
+        subQueue: currentState.subQueue
+      });
+    } else if (revisedDays.length === 0) {
+      deps.logger.info("Gemini change summary skipped", {
+        reason: "schedule-first-published",
         queue: currentState.queue,
         subQueue: currentState.subQueue
       });
@@ -294,7 +307,7 @@ const lightPlugin = {
           currentTomorrowPeriods: currentState.tomorrow.timePeriods.length
         });
 
-        const firstDay = changedDays[0];
+        const firstDay = revisedDays[0];
         const priorForPrompt = {
           ...previousState,
           today: previousScheduleForDay(previousState, currentState, "today") || { timePeriods: [] },
@@ -340,11 +353,12 @@ const lightPlugin = {
       });
     } else {
       for (const day of changedDays) {
+        const previousDay = previousScheduleForDay(previousState, currentState, day);
         notifications.push({
           type: `schedule-change:${day}`,
           text: buildDayLightNotification(
             currentState,
-            previousScheduleForDay(previousState, currentState, day),
+            hasPublishedSchedule(previousDay) ? previousDay : null,
             day,
             { changeSummary: summaries[day] }
           )

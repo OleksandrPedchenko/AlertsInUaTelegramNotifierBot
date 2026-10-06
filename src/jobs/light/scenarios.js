@@ -14,6 +14,7 @@ const { lightPlugin } = require("./plugin");
 const CASES = Object.freeze({
   initial: { time: "12:00", description: "First schedule notification", seed: false },
   "schedule-change": { time: "12:00", description: "Changed schedule with a real Gemini summary", gemini: true },
+  "tomorrow-appears": { time: "12:00", description: "Tomorrow schedule first published without a comparison" },
   "tomorrow-change": { time: "12:00", description: "Changed tomorrow schedule with a real Gemini summary", gemini: true },
   "off-reminder": { time: "16:50", description: "Light off at 17:00" },
   "on-reminder": { time: "17:50", description: "Light on at 18:00" },
@@ -77,6 +78,8 @@ async function runScenario({ caseName, time, queue = 5, subQueue = 1, leadMinute
   }
 
   const key = `${selectedQueue}.${selectedSubQueue}`;
+  const enableGemini = scenario.gemini || (caseName === "tomorrow-appears" &&
+    Boolean(env.LIGHT_GEMINI_API_KEY || env.GEMINI_API_KEY));
   const { current, previous } = makeStates(caseName, key);
   const server = createMockServer(current);
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "light-scenario-"));
@@ -96,13 +99,16 @@ async function runScenario({ caseName, time, queue = 5, subQueue = 1, leadMinute
       LIGHT_ALWAYS_SEND_TG_MESSAGE: "false",
       LIGHT_OUTAGE_REMINDER_BEFORE_MINUTES: String(selectedLead),
       LIGHT_CURRENT_MINUTE: String(currentMinute),
-      LIGHT_GEMINI_ENABLED: scenario.gemini ? "true" : "false",
+      LIGHT_GEMINI_ENABLED: enableGemini ? "true" : "false",
       LIGHT_LOCK_FILE_PATH: path.join(tempDir, "light.lock"),
       LIGHT_STATE_FILE_PATH: path.join(tempDir, "state.json")
     };
     const config = loadLightConfig(scenarioEnv, createEnvReader(scenarioEnv, { cwd: tempDir }));
     if (scenario.seed !== false) {
       const previousState = parseLightSchedule(renderPoeHtml(previous), selectedQueue, selectedSubQueue);
+      if (caseName === "tomorrow-appears") {
+        previousState.tomorrow = { timePeriods: [], totalTimeOn: 0, totalTimeOff: 0 };
+      }
       await writeJobState(config.job.stateFilePath, lightPlugin.getStateKey(config), previousState,
         lightPlugin.getStateFingerprint(previousState));
     }

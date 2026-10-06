@@ -120,7 +120,7 @@ function buildDayLightNotification(currentState, previousDay, day, options = {})
     details.push(...formatPeriods(dayLabel, previousDay.timePeriods, { markCurrent: false }));
     details.push("");
   }
-  details.push(`<b>Стало — ${dayLabel}</b>`);
+  if (previousDay) details.push(`<b>Стало — ${dayLabel}</b>`);
   details.push(...formatPeriods(dayLabel, currentDay.timePeriods, { markCurrent: day === "today" }));
   details.push(`Разом: +${prettyTime(currentDay.totalTimeOn)} -${prettyTime(currentDay.totalTimeOff)}`);
   lines.push("", ...(options.changeSummary ? ["<blockquote expandable>", ...details, "</blockquote>"] : details));

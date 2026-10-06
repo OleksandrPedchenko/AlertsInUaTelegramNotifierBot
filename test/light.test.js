@@ -11,7 +11,7 @@ const { writeJobState } = require("../src/lib/stateStore");
 const { loadLightConfig } = require("../src/jobs/light/config");
 const { createDefaultState, createMockServer, renderPoeHtml } = require("../src/jobs/light/mockServer");
 const { parseLightSchedule } = require("../src/jobs/light/parser");
-const { findPendingOutageReminder, getChangedDays, lightPlugin } = require("../src/jobs/light/plugin");
+const { findPendingOutageReminder, getChangedDays, lightPlugin, previousScheduleForDay } = require("../src/jobs/light/plugin");
 const { createMemoryLogger, createSilentLogger, createTempDir, createTextResponse } = require("./helpers");
 
 function row(statuses) {
@@ -260,6 +260,7 @@ test("day comparison follows calendar dates across midnight", () => {
   const previous = { scheduleDate: "2026-10-06", today: off, tomorrow: allOn };
   const current = { scheduleDate: "2026-10-07", today: allOn, tomorrow: off };
   assert.deepEqual(getChangedDays(previous, current), ["tomorrow"]);
+  assert.equal(previousScheduleForDay(previous, current, "tomorrow"), null);
 });
 
 test("light runner skips notification when selected queue fingerprint is unchanged", async () => {
@@ -589,6 +590,38 @@ test("light runner asks Gemini to explain changed segments when configured", asy
     ),
     true
   );
+});
+
+test("first publication of tomorrow sends its schedule without a Gemini comparison", async () => {
+  const dir = await createTempDir();
+  const config = buildLightConfig(dir, { LIGHT_GEMINI_API_KEY: "gemini-key" });
+  const previousState = {
+    ...parseLightSchedule(createPoeHtml([1, 1, 2, 3], []), 2, 2),
+    sourceUrl: config.poe.url
+  };
+  await writeJobState(config.job.stateFilePath, lightPlugin.getStateKey(config), previousState,
+    lightPlugin.getStateFingerprint(previousState));
+
+  const messages = [];
+  let geminiCalls = 0;
+  const fetchImpl = async (url, options = {}) => {
+    if (String(url).includes("api.telegram.org")) {
+      messages.push(JSON.parse(options.body).text);
+      return createTextResponse(200, JSON.stringify({ ok: true }));
+    }
+    if (String(url).includes("generativelanguage.googleapis.com")) {
+      geminiCalls += 1;
+      return createTextResponse(200, JSON.stringify({ candidates: [{ content: { parts: [{ text: "Зміна" }] } }] }));
+    }
+    return createTextResponse(200, createPoeHtml([1, 1, 2, 3], [1, 1, 2, 2]));
+  };
+  await runPluginJob(lightPlugin, {}, { config, logger: createSilentLogger(), fetchImpl });
+
+  assert.equal(geminiCalls, 0);
+  assert.equal(messages.length, 1);
+  assert.match(messages[0], /черга — завтра/);
+  assert.match(messages[0], /00:00 - 01:00/);
+  assert.doesNotMatch(messages[0], /Було|Стало|Що змінилось|blockquote/);
 });
 
 test("light stub mode reads local html and skips POE requests", async () => {

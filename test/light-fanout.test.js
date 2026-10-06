@@ -4,11 +4,13 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const test = require("node:test");
-const { createMockServer, createDefaultState } = require("../src/jobs/light/mockServer");
+const { createMockServer, createDefaultState, renderPoeHtml } = require("../src/jobs/light/mockServer");
 const { runFanout, loadSubscriptions } = require("../src/jobs/light/fanout");
 const { runLightJob } = require("../src/jobs/light/index");
 const { loadLightConfig } = require("../src/jobs/light/config");
 const { createEnvReader } = require("../src/lib/config");
+const { readJobState, writeJobState } = require("../src/lib/stateStore");
+const { lightPlugin } = require("../src/jobs/light/plugin");
 const { createSilentLogger, createTempDir, createTextResponse } = require("./helpers");
 
 test("fan-out fetches POE once and batches changed queues into one Gemini call", async () => {
@@ -158,6 +160,58 @@ test("tomorrow-only changes get a separate tomorrow message", async () => {
   } finally {
     await new Promise(resolve => server.close(resolve));
   }
+});
+
+test("fan-out skips Gemini when tomorrow first appears but uses it for a later revision", async () => {
+  const dir = await createTempDir();
+  const subscriptionsFile = path.join(dir, "subscriptions.json");
+  const stubFile = path.join(dir, "schedule.html");
+  await fs.writeFile(subscriptionsFile, JSON.stringify({ subscriptions: [{ queue: 1, subQueue: 1, chatId: "chat-a" }] }));
+  const state = createDefaultState();
+  await fs.writeFile(stubFile, renderPoeHtml(state));
+  const env = {
+    TG_BOT_TOKEN: "test-token", GEMINI_API_KEY: "test-gemini",
+    LIGHT_SUBSCRIPTIONS_FILE: subscriptionsFile,
+    LIGHT_USE_STUB: "true", LIGHT_STUB_FILE: stubFile,
+    LIGHT_STATE_FILE_PATH: path.join(dir, "state.json"),
+    LIGHT_LOCK_FILE_PATH: path.join(dir, "light.lock"),
+    LIGHT_GEMINI_MIN_INTERVAL_MINUTES: "0"
+  };
+  const messages = [];
+  let geminiCalls = 0;
+  const fetchImpl = async (url, options) => {
+    if (String(url).includes("api.telegram.org")) {
+      messages.push(JSON.parse(options.body).text);
+      return createTextResponse(200, JSON.stringify({ ok: true }));
+    }
+    geminiCalls += 1;
+    return createTextResponse(200, JSON.stringify({ candidates: [{ content: { parts: [{
+      text: JSON.stringify({ "1.1:tomorrow": "Зміна завтра" })
+    }] } }] }));
+  };
+  const config = loadLightConfig(env, createEnvReader(env, { cwd: dir }));
+  await runLightJob(config, { fetchImpl, logger: createSilentLogger() });
+  const stateKey = "light:1.1:chat:chat-a";
+  const previous = (await readJobState(env.LIGHT_STATE_FILE_PATH, stateKey)).state;
+  previous.tomorrow = { timePeriods: [], totalTimeOn: 0, totalTimeOff: 0 };
+  await writeJobState(env.LIGHT_STATE_FILE_PATH, stateKey, previous,
+    lightPlugin.getStateFingerprint(previous));
+  messages.length = 0;
+
+  await runLightJob(config, { fetchImpl, logger: createSilentLogger() });
+  assert.equal(geminiCalls, 0);
+  assert.equal(messages.length, 1);
+  assert.match(messages[0], /черга — завтра/);
+  assert.doesNotMatch(messages[0], /Було|Стало|Що змінилось/);
+
+  messages.length = 0;
+  state.days.tomorrow["1.1"].fill(2, 34, 36);
+  await fs.writeFile(stubFile, renderPoeHtml(state));
+  await runLightJob(config, { fetchImpl, logger: createSilentLogger() });
+  assert.equal(geminiCalls, 1);
+  assert.equal(messages.length, 1);
+  assert.match(messages[0], /Зміна завтра/);
+  assert.match(messages[0], /Було[^]*Стало/);
 });
 
 test("subscriptions reject duplicate destination and invalid queue", async () => {
