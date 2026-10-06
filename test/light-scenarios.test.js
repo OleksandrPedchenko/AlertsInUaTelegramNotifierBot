@@ -5,6 +5,7 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const test = require("node:test");
 const { runScenario, parseClockTime } = require("../src/jobs/light/scenarios");
+const scenarioSchedule = require("../src/jobs/light/scenarioSchedule.json");
 const { createTempDir, createTextResponse } = require("./helpers");
 
 const baseEnv = {
@@ -46,17 +47,39 @@ test("Gemini cases require an API key before sending", async () => {
   );
 });
 
+test("scenario fixture keeps fixed six-hour outage starts and a half-hour return period", () => {
+  for (const [day, queues] of Object.entries(scenarioSchedule.days)) {
+    for (const [queue, cells] of Object.entries(queues)) {
+      const starts = cells.flatMap((state, index) =>
+        state === 2 && (index === 0 || cells[index - 1] !== 2) ? [index] : []);
+      for (let index = 1; index < starts.length; index += 1) {
+        assert.equal((starts[index] - starts[index - 1]) % 12, 0, `${day} ${queue} outage starts`);
+      }
+      for (const start of starts) {
+        assert.equal(start % 2, Number(queue.endsWith(".2")), `${day} ${queue} outage clock offset`);
+      }
+      for (const start of starts) {
+        const end = cells.findIndex((state, index) => index > start && state !== 2);
+        if (end < 0) continue;
+        assert.equal(cells[end], 3, `${day} ${queue} return period`);
+        if (end + 1 < cells.length) {
+          assert.equal(cells[end + 1], 1, `${day} ${queue} light after return`);
+        }
+      }
+    }
+  }
+});
+
 for (const [caseName, time, expected, geminiCalls] of [
   ["initial", "12:00", /⚡ Новий графік/, 0],
   ["schedule-change", "12:00", /Змінився графік відключень/, 1],
-  ["start-later", "12:00", /Змінився графік відключень/, 1],
+  ["today-shorter", "12:00", /Змінився графік відключень/, 1],
   ["tomorrow-appears", "12:00", /З’явився графік на завтра/, 0],
   ["tomorrow-change", "12:00", /завтра/, 1],
-  ["off-reminder", "16:50", /🔴 Відключення через/, 0],
-  ["on-reminder", "17:50", /🟢 Світло з’явиться через/, 0],
-  ["tentative-on", "17:50", /🟡 Світло може з’явитися через/, 0],
-  ["midnight-off", "23:50", /Завтра 00:00–00:30/, 0],
-  ["midnight-on", "23:50", /Завтра 00:00–04:00/, 0]
+  ["off-reminder", "20:50", /🔴 Відключення через/, 0],
+  ["tentative-on", "15:50", /🟡 Світло може з’явитися через/, 0],
+  ["midnight-off", "23:50", /Завтра 00:00–01:00/, 0],
+  ["midnight-tentative-on", "23:50", /Завтра 00:00–00:30/, 0]
 ]) {
   test(`live scenario ${caseName} uses mock POE and sends expected Telegram message`, async () => {
     const actual = await execute(caseName, time);
@@ -75,21 +98,26 @@ for (const [caseName, time, expected, geminiCalls] of [
     if (caseName === "schedule-change") {
       assert.match(actual.messages[0].text, /Було[^]*🔴 15:00–16:00[^]*Тепер[^]*🔴 15:00–16:30[^]*🟡 16:30–17:00/);
     }
-    if (caseName === "start-later") {
-      assert.match(actual.messages[0].text, /Було[^]*🟢 00:00–15:00[^]*🔴 15:00–16:00[^]*Тепер[^]*🟢 00:00–15:30[^]*🔴 15:30–16:00/);
+    if (caseName === "today-shorter") {
+      assert.match(actual.messages[0].text, /Було[^]*🔴 15:00–16:00[^]*Тепер[^]*🔴 15:00–15:30[^]*🟡 15:30–16:00/);
     }
     if (caseName === "tomorrow-change") {
       assert.match(actual.messages[0].text, /Було[^]*🔴 10:00–11:00[^]*Тепер[^]*🔴 10:00–10:30[^]*🟡 10:30–11:00/);
+    }
+    if (caseName === "off-reminder" || caseName === "tentative-on") {
+      assert.doesNotMatch(actual.messages[0].text, /🔴 17:00–18:00/);
     }
     assert.equal(actual.geminiCalls, geminiCalls);
   });
 }
 
-test("schedule change and imminent outage send two separate messages", async () => {
-  const actual = await execute("schedule-and-off", "16:50");
+test("schedule change and imminent fixed-start outage send two separate messages", async () => {
+  const actual = await execute("schedule-and-off", "20:50");
   assert.equal(actual.messages.length, 2);
-  assert.match(actual.messages[0].text, /Змінився графік відключень/);
+  assert.match(actual.messages[0].text, /Змінився графік на завтра/);
+  assert.match(actual.messages[0].text, /Було[^]*🔴 10:00–11:00[^]*Тепер[^]*🔴 10:00–10:30/);
   assert.match(actual.messages[1].text, /🔴 Відключення через/);
+  assert.match(actual.messages[1].text, /21:00/);
   assert.equal(actual.geminiCalls, 1);
 });
 

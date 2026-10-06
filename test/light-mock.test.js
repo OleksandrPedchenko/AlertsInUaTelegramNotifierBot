@@ -8,8 +8,18 @@ const { runPluginJob } = require("../src/lib/runner");
 const { loadLightConfig } = require("../src/jobs/light/config");
 const { parseLightSchedule } = require("../src/jobs/light/parser");
 const { lightPlugin } = require("../src/jobs/light/plugin");
-const { createMockServer } = require("../src/jobs/light/mockServer");
+const { createDefaultState, createMockServer } = require("../src/jobs/light/mockServer");
 const { createSilentLogger, createTempDir, createTextResponse } = require("./helpers");
+
+test("default mock schedules put a half-hour return after each outage", () => {
+  const state = createDefaultState();
+  for (const day of ["today", "tomorrow"]) {
+    const cells = state.days[day]["5.1"];
+    const end = cells.findIndex((value, index) => value === 2 && cells[index + 1] !== 2) + 1;
+    assert.equal(cells[end], 3, day);
+    assert.equal(cells[end + 1], 1, day);
+  }
+});
 
 test("mock serves editable parser-compatible POE HTML and POST endpoint", async () => {
   const server = createMockServer();

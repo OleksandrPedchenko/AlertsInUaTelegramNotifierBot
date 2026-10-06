@@ -32,7 +32,7 @@ function createDefaultState() {
   };
 
   state.days.today["5.1"].splice(34, 4, 2, 2, 3, 1);
-  state.days.tomorrow["5.1"].splice(16, 4, 2, 2, 1, 1);
+  state.days.tomorrow["5.1"].splice(16, 4, 2, 2, 3, 1);
 
   return state;
 }

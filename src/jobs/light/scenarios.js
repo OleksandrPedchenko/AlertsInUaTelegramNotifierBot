@@ -16,15 +16,14 @@ const scenarioSchedule = require("./scenarioSchedule.json");
 const CASES = Object.freeze({
   initial: { time: "12:00", description: "First schedule notification", seed: false },
   "schedule-change": { time: "12:00", description: "Today's outage extends by 30 minutes, with a real Gemini summary", gemini: true },
-  "start-later": { time: "12:00", description: "Today's green period extends and the outage starts 30 minutes later", gemini: true },
+  "today-shorter": { time: "12:00", description: "Today's outage ends 30 minutes earlier without moving its start", gemini: true },
   "tomorrow-appears": { time: "12:00", description: "Tomorrow schedule first published without a comparison" },
   "tomorrow-change": { time: "12:00", description: "Tomorrow's outage shortens by 30 minutes, with a real Gemini summary", gemini: true },
-  "off-reminder": { time: "16:50", description: "Light off at 17:00" },
-  "on-reminder": { time: "17:50", description: "Light on at 18:00" },
-  "tentative-on": { time: "17:50", description: "Light may come on at 18:00" },
-  "midnight-off": { time: "23:50", description: "Light off tomorrow at 00:00" },
-  "midnight-on": { time: "23:50", description: "Light on tomorrow at 00:00" },
-  "schedule-and-off": { time: "16:50", description: "Gemini schedule change and light off reminder", gemini: true }
+  "off-reminder": { time: "20:50", description: "Queue 5.1 light off at its fixed 21:00 start" },
+  "tentative-on": { time: "15:50", description: "Queue 5.1 tentative return begins at 16:00" },
+  "midnight-off": { time: "23:50", queue: 2, subQueue: 1, description: "Queue 2.1 light off tomorrow at 00:00" },
+  "midnight-tentative-on": { time: "23:50", queue: 1, subQueue: 2, description: "Queue 1.2 tentative return tomorrow at 00:00" },
+  "schedule-and-off": { time: "20:50", description: "Tomorrow outage shortens and queue 5.1 has its fixed 21:00 off reminder", gemini: true }
 });
 
 function parseClockTime(value) {
@@ -57,8 +56,8 @@ function makeStates(caseName, keys) {
     }
     const today = current.days.today[key];
     const tomorrow = current.days.tomorrow[key];
-    if (["schedule-change", "start-later", "tomorrow-change"].includes(caseName)) {
-      const cells = caseName === "tomorrow-change" ? tomorrow : today;
+    if (["schedule-change", "today-shorter", "tomorrow-change", "schedule-and-off"].includes(caseName)) {
+      const cells = ["tomorrow-change", "schedule-and-off"].includes(caseName) ? tomorrow : today;
       const firstOutage = cells.findIndex((status, index) =>
         status === 2 && index > 0 && cells[index - 1] === 1 &&
         (caseName === "schedule-change" || cells[index + 1] === 2));
@@ -68,35 +67,12 @@ function makeStates(caseName, keys) {
       if (caseName === "schedule-change") {
         cells[end] = 2;
         cells[end + 1] = 3;
-      } else if (caseName === "start-later") {
-        cells[firstOutage] = 1;
       } else {
         cells[end - 1] = 3;
         cells[end] = 1;
       }
     }
-    if (["off-reminder", "schedule-and-off"].includes(caseName)) {
-      today[33] = 1;
-      today.fill(2, 34, 36);
-      if (caseName === "schedule-and-off") {
-        previous.days.today[key].fill(1, 33, 36);
-      }
-    }
-    if (["on-reminder", "tentative-on"].includes(caseName)) {
-      today.fill(2, 34, 36);
-      today[36] = caseName === "tentative-on" ? 3 : 1;
-    }
-    if (caseName === "midnight-off") {
-      today[47] = 1;
-      tomorrow[0] = 2;
-      tomorrow[1] = 1;
-    }
-    if (caseName === "midnight-on") {
-      today[47] = 2;
-      tomorrow[0] = 1;
-    }
-
-    if (["off-reminder", "on-reminder", "tentative-on", "midnight-off", "midnight-on"].includes(caseName)) {
+    if (["off-reminder", "tentative-on", "midnight-off", "midnight-tentative-on"].includes(caseName)) {
       previous.days.today[key] = [...today];
       previous.days.tomorrow[key] = [...tomorrow];
     }
@@ -108,8 +84,8 @@ async function runScenario({ caseName, time, queue, subQueue, leadMinutes = 10, 
   const scenario = CASES[caseName];
   if (!scenario) throw new Error(`Unknown case: ${caseName}. Run --list to see available cases.`);
   const currentMinute = parseClockTime(time || scenario.time);
-  const selectedQueue = parseChoice(queue ?? 5, "queue", 1, 6);
-  const selectedSubQueue = parseChoice(subQueue ?? 1, "subqueue", 1, 2);
+  const selectedQueue = parseChoice(queue ?? scenario.queue ?? 5, "queue", 1, 6);
+  const selectedSubQueue = parseChoice(subQueue ?? scenario.subQueue ?? 1, "subqueue", 1, 2);
   const selectedLead = parseChoice(leadMinutes, "lead", 1, 1440);
   if (scenario.gemini && !(env.LIGHT_GEMINI_API_KEY || env.GEMINI_API_KEY)) {
     throw new Error(`${caseName} requires LIGHT_GEMINI_API_KEY or GEMINI_API_KEY`);
