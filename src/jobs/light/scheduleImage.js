@@ -63,7 +63,7 @@ function drawBar(day, halfStart, y) {
   return shapes.join("");
 }
 
-function drawTimelines(day, previous, y, currentMinute, isToday) {
+function drawTimelines(day, previous, y) {
   const compared = Boolean(previous?.timePeriods?.length);
   const lines = [];
   for (let half = 0; half < 2; half += 1) {
@@ -83,41 +83,27 @@ function drawTimelines(day, previous, y, currentMinute, isToday) {
     } else {
       lines.push(drawBar(day, halfStart, firstBarY));
     }
-    if (isToday && Number.isInteger(currentMinute) && currentMinute >= halfStart && currentMinute < halfStart + 720) {
-      const markerX = BAR_X + (currentMinute - halfStart) * BAR_WIDTH / 720;
-      lines.push(`<line x1="${markerX}" y1="${firstBarY - 4}" x2="${markerX}" y2="${firstBarY + (compared ? 67 : 29)}" stroke="#FFFFFF" stroke-width="3" stroke-dasharray="5 4"/>`);
-    }
   }
   return { svg: lines.join(""), height: compared ? 224 : 172 };
 }
 
-function drawDay(day, label, date, previous, currentMinute, y, isToday) {
+function drawDay(day, label, date, previous, y, isToday) {
   const parts = [`<text x="48" y="${y + 29}" class="day">${label}${shortDate(date, isToday ? 0 : 1)}</text>`];
-  if (isToday && Number.isInteger(currentMinute)) {
-    const active = day?.timePeriods?.find(period => period.startMin <= currentMinute && currentMinute < period.endMin);
-    if (active) {
-      const status = active.status || active.state;
-      const stateText = status === 2 ? "без світла" : status === 3 ? "можливе світло" : "світло є";
-      parts.push(`<rect x="570" y="${y - 1}" width="382" height="42" rx="21" fill="#26374B"/>
-        <circle cx="593" cy="${y + 20}" r="9" fill="${COLORS[status] || "#64748B"}"/>
-        <text x="612" y="${y + 27}" class="status">Зараз ${stateText} · до ${clock(active.endMin)}</text>`);
-    }
-  }
   const chipsY = y + 52;
   const outages = drawOutages(day, chipsY);
   parts.push(outages.svg);
   const timelineY = chipsY + outages.rows * 60 + 15;
-  const timeline = drawTimelines(day, previous, timelineY, currentMinute, isToday);
+  const timeline = drawTimelines(day, previous, timelineY);
   parts.push(timeline.svg);
   return { svg: parts.join(""), nextY: timelineY + timeline.height + 18 };
 }
 
-async function renderScheduleImage({ queue, subQueue, day, previous, current, currentMinute, scheduleDate }) {
+async function renderScheduleImage({ queue, subQueue, day, previous, current, scheduleDate }) {
   const sections = [{ day: current, label: day === "tomorrow" ? "Завтра" : "Сьогодні", previous, isToday: day !== "tomorrow" }];
   let y = 88;
   const content = [];
   for (const section of sections) {
-    const drawn = drawDay(section.day, section.label, scheduleDate, section.previous, currentMinute, y, section.isToday);
+    const drawn = drawDay(section.day, section.label, scheduleDate, section.previous, y, section.isToday);
     content.push(drawn.svg);
     y = drawn.nextY;
   }
@@ -128,7 +114,7 @@ async function renderScheduleImage({ queue, subQueue, day, previous, current, cu
     <text x="75" y="${y + 15}" class="legend">Жовтий — можливе світло</text>` : "";
   const height = Math.ceil(y + (hasYellow ? 48 : 20));
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${height}" viewBox="0 0 ${WIDTH} ${height}">
-    <style>text{font-family:DejaVu Sans,Noto Sans,Arial,sans-serif;fill:#F3F7FC}.title{font-size:36px;font-weight:700}.day{font-size:26px;font-weight:700}.outage{font-size:25px;font-weight:700}.duration{font-size:17px;fill:#E6C5C7}.empty{font-size:22px;font-weight:700;fill:#BDEAD0}.status{font-size:18px;font-weight:700}.half{font-size:18px;font-weight:700}.tick{font-size:16px;fill:#C3CFDE}.row{font-size:17px;font-weight:700}.legend{font-size:17px;fill:#C3CFDE}</style>
+    <style>text{font-family:DejaVu Sans,Noto Sans,Arial,sans-serif;fill:#F3F7FC}.title{font-size:36px;font-weight:700}.day{font-size:26px;font-weight:700}.outage{font-size:25px;font-weight:700}.duration{font-size:17px;fill:#E6C5C7}.empty{font-size:22px;font-weight:700;fill:#BDEAD0}.half{font-size:18px;font-weight:700}.tick{font-size:16px;fill:#C3CFDE}.row{font-size:17px;font-weight:700}.legend{font-size:17px;fill:#C3CFDE}</style>
     <rect width="100%" height="100%" fill="#15202E"/>
     <text x="48" y="60" class="title">Черга ${escapeXml(queue)}.${escapeXml(subQueue)}</text>
     ${content.join("")}${legend}

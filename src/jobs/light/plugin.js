@@ -395,7 +395,7 @@ const lightPlugin = {
         try {
           notification.photo = await renderScheduleImage({
             queue: currentState.queue, subQueue: currentState.subQueue,
-            day, previous, current, currentMinute: currentState.currentMinute,
+            day, previous, current,
             scheduleDate: currentState.scheduleDate
           });
         } catch (error) {

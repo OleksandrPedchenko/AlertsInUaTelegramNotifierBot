@@ -7,12 +7,11 @@ function escapeHtml(value) {
     .replace(/>/g, "&gt;");
 }
 
-function formatPeriod(period, markCurrent = true) {
+function formatPeriod(period) {
   const emoji = { 1: "🟢", 2: "🔴", 3: "🟡" }[period.status || period.state] || "⚪";
-  const currentMarker = period.current && markCurrent ? " ← зараз" : "";
   return `${emoji} ${escapeHtml(String(period.time).replace(" - ", "–"))} · ${escapeHtml(
     period.statusLabel
-  )}${currentMarker}`;
+  )}`;
 }
 
 function formatOutageReminder(reminder) {
@@ -32,23 +31,23 @@ function formatOutageReminder(reminder) {
   ];
 }
 
-function formatPeriods(title, periods, options = {}) {
+function formatPeriods(title, periods) {
   if (!periods.length) {
     return [...(title ? [`<b>${escapeHtml(title)}</b>`] : []), "Немає даних"];
   }
 
   return [
     ...(title ? [`<b>${escapeHtml(title)}</b>`] : []),
-    ...periods.map((period) => formatPeriod(period, options.markCurrent !== false))
+    ...periods.map(formatPeriod)
   ];
 }
 
-function buildScheduleDetails(state, options = {}) {
-  const lines = [...formatPeriods("Сьогодні", state.today.timePeriods, options)];
+function buildScheduleDetails(state) {
+  const lines = [...formatPeriods("Сьогодні", state.today.timePeriods)];
 
   if (state.tomorrow.timePeriods.length) {
     lines.push("");
-    lines.push(...formatPeriods("Завтра", state.tomorrow.timePeriods, { markCurrent: false }));
+    lines.push(...formatPeriods("Завтра", state.tomorrow.timePeriods));
   }
 
   return lines;
@@ -74,7 +73,7 @@ function buildLightNotification(currentState, previousState = null, options = {}
 
     const details = [
       "<b>Було</b>",
-      ...buildScheduleDetails(previousState, { markCurrent: false }),
+      ...buildScheduleDetails(previousState),
       "",
       "<b>Тепер</b>",
       ...buildScheduleDetails(currentState)
@@ -102,11 +101,11 @@ function buildDayLightNotification(currentState, previousDay, day, options = {})
   const details = [];
   if (previousDay) {
     details.push("<b>Було</b>");
-    details.push(...formatPeriods("", previousDay.timePeriods, { markCurrent: false }));
+    details.push(...formatPeriods("", previousDay.timePeriods));
     details.push("");
     details.push("<b>Тепер</b>");
   }
-  details.push(...formatPeriods(previousDay ? "" : dayLabel, currentDay.timePeriods, { markCurrent: day === "today" }));
+  details.push(...formatPeriods(previousDay ? "" : dayLabel, currentDay.timePeriods));
   lines.push("", ...(previousDay ? expandableQuote(details) : details));
   lines.push(...formatUpdatedAt(currentState));
   return lines.join("\n");

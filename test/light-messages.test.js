@@ -30,6 +30,7 @@ test("new schedules show colored full periods without source or quote", () => {
   }
   assert.match(tomorrow, /З’явився графік на завтра/);
   assert.doesNotMatch(initial, /Зараз:/);
+  assert.doesNotMatch(initial, /← зараз/);
 });
 
 test("a forced repeat keeps the full schedule in an expandable quote", () => {
@@ -45,6 +46,7 @@ test("revisions keep the summary visible and always quote the full old and new d
     assert.match(message, /🔄 Змінився графік на сьогодні/);
     assert.match(message, /<blockquote expandable>[^]*Було[^]*🟢 00:00–17:00[^]*Тепер[^]*🔴 17:00–18:00[^]*<\/blockquote>/);
     assert.doesNotMatch(message, /Джерело|example\.test|Разом:/);
+    assert.doesNotMatch(message, /← зараз/);
   }
   assert.ok(withSummary.indexOf("Відключення змінилось.") < withSummary.indexOf("<blockquote expandable>"));
 });
@@ -61,5 +63,6 @@ test("reminders lead with colored action and quote the full schedule", () => {
     assert.match(message, headline);
     assert.match(message, /<blockquote expandable>[^]*Сьогодні[^]*🔴 17:00–18:00[^]*Завтра[^]*<\/blockquote>/);
     assert.doesNotMatch(message, /Джерело|example\.test/);
+    assert.doesNotMatch(message, /← зараз/);
   }
 });

@@ -34,6 +34,17 @@ test("schedule image renders old and new outage periods as a readable PNG", asyn
   assert.deepEqual(await pixel(403), [45, 189, 104]); // 15:45 is green now.
 });
 
+test("schedule image is independent of the time the notification was sent", async () => {
+  const current = { timePeriods: [
+    { status: 1, startMin: 0, endMin: 900 },
+    { status: 2, startMin: 900, endMin: 960 },
+    { status: 1, startMin: 960, endMin: 1440 }
+  ] };
+  const morning = await renderScheduleImage({ queue: 5, subQueue: 1, day: "today", current, currentMinute: 480 });
+  const evening = await renderScheduleImage({ queue: 5, subQueue: 1, day: "today", current, currentMinute: 1080 });
+  assert.equal(Buffer.compare(morning, evening), 0);
+});
+
 test("yellow legend appears only when a yellow period is displayed", async () => {
   const green = { timePeriods: [{ status: 1, startMin: 0, endMin: 1440 }] };
   const yellow = { timePeriods: [
