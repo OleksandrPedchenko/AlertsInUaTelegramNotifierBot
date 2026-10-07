@@ -82,11 +82,11 @@ test("vertical timelines align half-hour cells and old/new status", async () => 
   assert.equal(width, 1000);
   assert.ok(height > 800 && height < 1100);
   const pixel = async (x, y) => [...await sharp(png).extract({ left: x, top: y, width: 1, height: 1 }).removeAlpha().raw().toBuffer()];
-  assert.deepEqual(await pixel(630, 490), [227, 75, 82]);
-  assert.deepEqual(await pixel(800, 490), [45, 189, 104]);
-  assert.notDeepEqual(await pixel(800, 480), await pixel(800, 490));
-  assert.notDeepEqual(await pixel(133, 324), await pixel(133, 350));
-  assert.notDeepEqual(await pixel(200, 324), await pixel(200, 350));
+  assert.deepEqual(await pixel(630, 518), [227, 75, 82]);
+  assert.deepEqual(await pixel(800, 518), [45, 189, 104]);
+  assert.notDeepEqual(await pixel(800, 508), await pixel(800, 518));
+  assert.notDeepEqual(await pixel(133, 352), await pixel(133, 378));
+  assert.notDeepEqual(await pixel(200, 352), await pixel(200, 378));
 });
 
 test("vertical layout can be selected for live schedule posts", async () => {

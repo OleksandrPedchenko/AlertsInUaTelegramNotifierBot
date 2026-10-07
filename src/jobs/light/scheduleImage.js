@@ -152,7 +152,7 @@ function verticalStatus(day, minute) {
 function verticalPanel(current, previous, startMinute, x, y) {
   const compared = Boolean(previous?.timePeriods?.length);
   const rowHeight = 26;
-  const barY = y + 48;
+  const barY = y + (compared ? 76 : 48);
   const bars = compared
     ? [{ day: previous, x: x + 92, width: 154 }, { day: current, x: x + 260, width: 154 }]
     : [{ day: current, x: x + 92, width: 322 }];
@@ -160,8 +160,8 @@ function verticalPanel(current, previous, startMinute, x, y) {
     `<text x="${x}" y="${y + 25}" class="half">${clock(startMinute)}–${clock(startMinute + 720)}</text>`
   ];
   if (compared) {
-    parts.push(`<text x="${bars[0].x + bars[0].width / 2}" y="${y + 25}" text-anchor="middle" class="row">Було</text>`);
-    parts.push(`<text x="${bars[1].x + bars[1].width / 2}" y="${y + 25}" text-anchor="middle" class="row">Тепер</text>`);
+    parts.push(`<text x="${bars[0].x + bars[0].width / 2}" y="${y + 55}" text-anchor="middle" class="row">Було</text>`);
+    parts.push(`<text x="${bars[1].x + bars[1].width / 2}" y="${y + 55}" text-anchor="middle" class="row">Тепер</text>`);
   } else {
     parts.push(`<text x="${bars[0].x + bars[0].width / 2}" y="${y + 25}" text-anchor="middle" class="row">Світло</text>`);
   }
@@ -193,7 +193,7 @@ async function renderVerticalScheduleImage({ queue, subQueue, day, previous, cur
   const outages = drawOutages(current, 140);
   const totalsY = 140 + outages.rows * 60 + 20;
   const timelineY = totalsY + 30;
-  const height = timelineY + 48 + 24 * 26 + 35;
+  const height = timelineY + (previous?.timePeriods?.length ? 76 : 48) + 24 * 26 + 35;
   const hasYellow = [current, previous].some(item =>
     item?.timePeriods?.some(period => (period.status || period.state) === 3)
   );
