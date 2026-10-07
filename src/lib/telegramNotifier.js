@@ -21,7 +21,6 @@ async function sendTelegramPhoto(png, caption, config, options = {}) {
   body.set("chat_id", config.chatId);
   body.set("caption", caption);
   body.set("parse_mode", config.parseMode || "HTML");
-  body.set("show_caption_above_media", "true");
   body.set("photo", new Blob([png], { type: "image/png" }), "schedule.png");
 
   let response;

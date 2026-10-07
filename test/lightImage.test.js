@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const fs = require("node:fs/promises");
 const path = require("node:path");
+const sharp = require("sharp");
 
 const { renderScheduleImage } = require("../src/jobs/light/scheduleImage");
 const { sendTelegramPhoto } = require("../src/lib/telegramNotifier");
@@ -24,6 +25,20 @@ test("schedule image renders old and new outage periods as a readable PNG", asyn
   const png = await renderScheduleImage({ queue: 5, subQueue: 1, day: "today", previous, current, currentMinute: 720 });
   assert.deepEqual([...png.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
   assert.ok(png.length > 10000);
+});
+
+test("yellow legend appears only when a yellow period is displayed", async () => {
+  const green = { timePeriods: [{ status: 1, startMin: 0, endMin: 1440 }] };
+  const yellow = { timePeriods: [
+    { status: 1, startMin: 0, endMin: 900 },
+    { status: 3, startMin: 900, endMin: 930 },
+    { status: 1, startMin: 930, endMin: 1440 }
+  ] };
+  const greenPng = await renderScheduleImage({ queue: 5, subQueue: 1, day: "today", current: green });
+  const yellowPng = await renderScheduleImage({ queue: 5, subQueue: 1, day: "today", current: yellow });
+  const legendPixel = image => sharp(image).extract({ left: 530, top: 90, width: 1, height: 1 }).removeAlpha().raw().toBuffer();
+  assert.deepEqual([...await legendPixel(greenPng)], [21, 32, 46]);
+  assert.deepEqual([...await legendPixel(yellowPng)], [232, 185, 52]);
 });
 
 test("initial light schedule is delivered as one inline photo", async () => {
@@ -64,6 +79,7 @@ test("Telegram photo sender uploads generated PNG and caption together", async (
   assert.equal(sent.options.body.get("chat_id"), "chat");
   assert.equal(sent.options.body.get("caption"), "<b>Змінився графік</b>");
   assert.equal(sent.options.body.get("parse_mode"), "HTML");
+  assert.notEqual(sent.options.body.get("show_caption_above_media"), "true");
   assert.equal(sent.options.body.get("photo").type, "image/png");
 });
 
