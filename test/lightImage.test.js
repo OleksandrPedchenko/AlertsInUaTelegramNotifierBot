@@ -45,6 +45,14 @@ test("schedule image is independent of the time the notification was sent", asyn
   assert.equal(Buffer.compare(morning, evening), 0);
 });
 
+test("timeline bars show visible separators at every half-hour", async () => {
+  const current = { timePeriods: [{ status: 1, startMin: 0, endMin: 1440 }] };
+  const png = await renderScheduleImage({ queue: 5, subQueue: 1, day: "today", current });
+  const pixel = async x => [...await sharp(png).extract({ left: x, top: 252, width: 1, height: 1 }).removeAlpha().raw().toBuffer()];
+  assert.notDeepEqual(await pixel(164), await pixel(150));
+  assert.notDeepEqual(await pixel(267), await pixel(250));
+});
+
 test("yellow legend appears only when a yellow period is displayed", async () => {
   const green = { timePeriods: [{ status: 1, startMin: 0, endMin: 1440 }] };
   const yellow = { timePeriods: [

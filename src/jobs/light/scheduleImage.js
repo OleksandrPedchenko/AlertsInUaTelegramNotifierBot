@@ -59,6 +59,12 @@ function drawBar(day, halfStart, y) {
     const width = (end - start) * BAR_WIDTH / 720;
     shapes.push(`<rect x="${x}" y="${y}" width="${width}" height="25" fill="${COLORS[period.status || period.state] || "#64748B"}"/>`);
   }
+  for (let tick = 1; tick < 24; tick += 1) {
+    const x = BAR_X + tick * BAR_WIDTH / 24;
+    const lineWidth = tick % 12 === 0 ? 5 : tick % 4 === 0 ? 4 : tick % 2 === 0 ? 3 : 2;
+    const opacity = tick % 12 === 0 ? 0.9 : tick % 4 === 0 ? 0.75 : tick % 2 === 0 ? 0.6 : 0.45;
+    shapes.push(`<rect x="${x - lineWidth / 2}" y="${y}" width="${lineWidth}" height="25" fill="#DCE6F1" opacity="${opacity}"/>`);
+  }
   shapes.push(`<rect x="${BAR_X}" y="${y}" width="${BAR_WIDTH}" height="25" rx="7" fill="none" stroke="#56677E" stroke-width="2"/>`);
   return shapes.join("");
 }
