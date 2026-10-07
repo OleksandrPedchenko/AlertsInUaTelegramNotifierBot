@@ -128,4 +128,70 @@ async function renderScheduleImage({ queue, subQueue, day, previous, current, sc
   return sharp(Buffer.from(svg)).png().toBuffer();
 }
 
-module.exports = { renderScheduleImage };
+function verticalStatus(day, minute) {
+  const period = day?.timePeriods?.find(item => item.startMin <= minute && minute < item.endMin);
+  return COLORS[period?.status || period?.state] || "#64748B";
+}
+
+function verticalPanel(current, previous, startMinute, x, y) {
+  const compared = Boolean(previous?.timePeriods?.length);
+  const rowHeight = 26;
+  const barY = y + 48;
+  const bars = compared
+    ? [{ day: previous, x: x + 92, width: 154 }, { day: current, x: x + 260, width: 154 }]
+    : [{ day: current, x: x + 92, width: 322 }];
+  const parts = [
+    `<text x="${x}" y="${y + 25}" class="half">${clock(startMinute)}–${clock(startMinute + 720)}</text>`
+  ];
+  if (compared) {
+    parts.push(`<text x="${bars[0].x + bars[0].width / 2}" y="${y + 25}" text-anchor="middle" class="row">Було</text>`);
+    parts.push(`<text x="${bars[1].x + bars[1].width / 2}" y="${y + 25}" text-anchor="middle" class="row">Тепер</text>`);
+  } else {
+    parts.push(`<text x="${bars[0].x + bars[0].width / 2}" y="${y + 25}" text-anchor="middle" class="row">Світло</text>`);
+  }
+  for (let cell = 0; cell < 24; cell += 1) {
+    const minute = startMinute + cell * 30;
+    const top = barY + cell * rowHeight;
+    for (const bar of bars) {
+      parts.push(`<rect x="${bar.x}" y="${top + 1}" width="${bar.width}" height="${rowHeight - 1}" fill="${verticalStatus(bar.day, minute + 15)}"/>`);
+    }
+  }
+  for (let boundary = 0; boundary <= 24; boundary += 1) {
+    const top = barY + boundary * rowHeight;
+    const hour = boundary % 2 === 0;
+    if (hour) {
+      parts.push(`<text x="${x + 74}" y="${top + 7}" text-anchor="end" class="vertical-tick">${clock(startMinute + boundary * 30)}</text>`);
+      if (boundary > 0 && boundary < 24) {
+        for (const bar of bars) {
+          parts.push(`<rect x="${bar.x}" y="${top - 3}" width="${bar.width}" height="6" fill="#0B1625" opacity="0.95"/>`);
+        }
+      }
+    }
+    parts.push(`<rect x="${x + (hour ? 84 : 88)}" y="${top}" width="${hour ? 8 : 4}" height="${hour ? 2 : 1}" fill="${hour ? "#DCE6F1" : "#718198"}"/>`);
+  }
+  return parts.join("");
+}
+
+async function renderVerticalScheduleImage({ queue, subQueue, day, previous, current, scheduleDate }) {
+  const label = day === "tomorrow" ? "Завтра" : "Сьогодні";
+  const outages = drawOutages(current, 140);
+  const timelineY = 140 + outages.rows * 60 + 20;
+  const height = timelineY + 48 + 24 * 26 + 35;
+  const hasYellow = [current, previous].some(item =>
+    item?.timePeriods?.some(period => (period.status || period.state) === 3)
+  );
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${height + (hasYellow ? 30 : 0)}" viewBox="0 0 ${WIDTH} ${height + (hasYellow ? 30 : 0)}">
+    <style>text{font-family:DejaVu Sans,Noto Sans,Arial,sans-serif;fill:#F3F7FC}.title{font-size:36px;font-weight:700}.day{font-size:26px;font-weight:700}.outage{font-size:25px;font-weight:700}.duration{font-size:17px;fill:#E6C5C7}.empty{font-size:22px;font-weight:700;fill:#BDEAD0}.half{font-size:23px;font-weight:700}.row{font-size:20px;font-weight:700}.vertical-tick{font-size:22px;font-weight:700;fill:#DCE6F1}.legend{font-size:17px;fill:#C3CFDE}</style>
+    <rect width="100%" height="100%" fill="#15202E"/>
+    <text x="48" y="60" class="title">Черга ${escapeXml(queue)}.${escapeXml(subQueue)}</text>
+    <text x="48" y="117" class="day">${label}${shortDate(scheduleDate, day === "tomorrow" ? 1 : 0)}</text>
+    <text x="952" y="117" text-anchor="end" class="vertical-tick">Кожна клітинка · 30 хв</text>
+    ${outages.svg}
+    ${verticalPanel(current, previous, 0, 48, timelineY)}
+    ${verticalPanel(current, previous, 720, 508, timelineY)}
+    ${hasYellow ? `<rect x="48" y="${height}" width="17" height="17" fill="${COLORS[3]}"/><text x="75" y="${height + 15}" class="legend">Жовтий — можливе світло</text>` : ""}
+  </svg>`;
+  return sharp(Buffer.from(svg)).png().toBuffer();
+}
+
+module.exports = { renderScheduleImage, renderVerticalScheduleImage };

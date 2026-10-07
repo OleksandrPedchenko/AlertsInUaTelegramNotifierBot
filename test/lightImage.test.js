@@ -6,7 +6,7 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const sharp = require("sharp");
 
-const { renderScheduleImage } = require("../src/jobs/light/scheduleImage");
+const { renderScheduleImage, renderVerticalScheduleImage } = require("../src/jobs/light/scheduleImage");
 const { sendTelegramNotification, sendTelegramPhoto } = require("../src/lib/telegramNotifier");
 const { runScenario } = require("../src/jobs/light/scenarios");
 const { lightPlugin } = require("../src/jobs/light/plugin");
@@ -51,6 +51,50 @@ test("timeline bars show visible separators at every half-hour", async () => {
   const pixel = async x => [...await sharp(png).extract({ left: x, top: 252, width: 1, height: 1 }).removeAlpha().raw().toBuffer()];
   assert.notDeepEqual(await pixel(164), await pixel(150));
   assert.notDeepEqual(await pixel(267), await pixel(250));
+});
+
+test("vertical timelines align half-hour cells and old/new status", async () => {
+  const previous = { timePeriods: [
+    { status: 1, startMin: 0, endMin: 900 },
+    { status: 2, startMin: 900, endMin: 960 },
+    { status: 1, startMin: 960, endMin: 1440 }
+  ] };
+  const current = { timePeriods: [
+    { status: 1, startMin: 0, endMin: 900 },
+    { status: 2, startMin: 900, endMin: 930 },
+    { status: 1, startMin: 930, endMin: 1440 }
+  ] };
+  const png = await renderVerticalScheduleImage({ queue: 5, subQueue: 1, day: "today", previous, current });
+  const { width, height } = await sharp(png).metadata();
+  assert.equal(width, 1000);
+  assert.ok(height > 800 && height < 1100);
+  const pixel = async (x, y) => [...await sharp(png).extract({ left: x, top: y, width: 1, height: 1 }).removeAlpha().raw().toBuffer()];
+  assert.deepEqual(await pixel(630, 460), [227, 75, 82]);
+  assert.deepEqual(await pixel(800, 460), [45, 189, 104]);
+  assert.notDeepEqual(await pixel(800, 450), await pixel(800, 460));
+  assert.notDeepEqual(await pixel(133, 294), await pixel(133, 320));
+  assert.notDeepEqual(await pixel(200, 294), await pixel(200, 320));
+});
+
+test("vertical layout can be selected for live schedule posts", async () => {
+  const deliveries = [];
+  await runScenario({
+    caseName: "initial",
+    env: {
+      TG_BOT_TOKEN: "token", TG_CHAT_ID: "chat", LIGHT_SCHEDULE_IMAGE_LAYOUT: "vertical",
+      LIGHT_GEMINI_ENABLED: "false"
+    },
+    fetchImpl: async (url, options) => {
+      if (!String(url).includes("api.telegram.org")) return fetch(url, options);
+      deliveries.push({ url: String(url), body: options.body });
+      return new Response(JSON.stringify({ ok: true, result: { message_id: 1 } }), { status: 200 });
+    }
+  });
+  assert.equal(deliveries.length, 2);
+  assert.ok(deliveries.every(item => item.url.endsWith("/sendPhoto")));
+  const png = Buffer.from(await deliveries[0].body.get("photo").arrayBuffer());
+  assert.ok((await sharp(png).metadata()).height > 800);
+  assert.match(deliveries[0].body.get("caption"), /на сьогодні/);
 });
 
 test("yellow legend appears only when a yellow period is displayed", async () => {

@@ -133,6 +133,10 @@ function readLokiConfig(readers) {
 }
 
 function loadLightConfig(_env, readers) {
+  const scheduleImageLayout = readers.readOptionalString("LIGHT_SCHEDULE_IMAGE_LAYOUT", "horizontal");
+  if (!["horizontal", "vertical"].includes(scheduleImageLayout)) {
+    throw new Error("LIGHT_SCHEDULE_IMAGE_LAYOUT must be horizontal or vertical");
+  }
   const subscriptionsFilePath = readers.readOptionalString("LIGHT_SUBSCRIPTIONS_FILE")
     ? readers.readResolvedPath("LIGHT_SUBSCRIPTIONS_FILE") : null;
   const useStub = readers.readBoolean("LIGHT_USE_STUB", false);
@@ -222,6 +226,7 @@ function loadLightConfig(_env, readers) {
       useStub,
       treatYellowAsGreen: readers.readBoolean("LIGHT_TREAT_YELLOW_AS_GREEN", true),
       scheduleImageEnabled: readers.readBoolean("LIGHT_SCHEDULE_IMAGE_ENABLED", true),
+      scheduleImageLayout,
       alwaysSendTgMessage: readers.readBoolean("LIGHT_ALWAYS_SEND_TG_MESSAGE", false),
       outageReminderBeforeMinutes: readers.readNumber("LIGHT_OUTAGE_REMINDER_BEFORE_MINUTES", 0, {
         integer: true,

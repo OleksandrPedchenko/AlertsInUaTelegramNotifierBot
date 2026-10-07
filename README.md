@@ -84,6 +84,7 @@ One-shot Node.js job that fetches active air raid alert state for a region and t
 - `LIGHT_STUB_FILE` (optional): local HTML fixture for stub mode. Default `light-example.html`.
 - `LIGHT_TREAT_YELLOW_AS_GREEN` (optional): defaults to `true`. Treats POE yellow `light_3` periods as light on in messages, change comparisons, Gemini summaries, and return reminders. Set `false` to show yellow as tentative and say light may return. POE's raw statuses remain in saved state, so switching modes alone does not announce a schedule change.
 - `LIGHT_SCHEDULE_IMAGE_ENABLED` (optional): defaults to `true`. Each schedule publication or revision sends one post with a compact timeline photo and the full text as its caption. If the text exceeds Telegram's photo-caption limit, the bot sends a text-only post to preserve the full schedule. Set `false` to send text only. Outage reminders remain text messages.
+- `LIGHT_SCHEDULE_IMAGE_LAYOUT` (optional): `horizontal` by default. Set `vertical` to try two side-by-side 12-hour vertical timelines, each divided into 30-minute cells. The setting changes only the generated image.
 
 The image renderer uses `sharp`; run `npm ci` after updating the VM. Install a font with Ukrainian Cyrillic glyphs (for example `fonts-dejavu-core` on Debian) so the timeline labels render correctly.
 - `GEMINI_API_KEY` or `LIGHT_GEMINI_API_KEY` (optional): Gemini API key used to summarize what changed between old and new light segments.
@@ -133,6 +134,8 @@ npm run test:light:live -- --case tentative-on --time 15:50
 npm run test:light:live -- --case midnight-off --time 23:50
 npm run test:light:live -- --case midnight-tentative-on --time 23:50
 npm run test:light:live -- --case schedule-and-off --time 20:50
+LIGHT_SCHEDULE_IMAGE_LAYOUT=vertical npm run test:light:live -- --case initial
+LIGHT_SCHEDULE_IMAGE_LAYOUT=vertical npm run test:light:live -- --case today-shorter
 ```
 
 `--time HH:MM` sets the worker's current local clock time for the run. Each case has a default time shown by `--list`; `--lead N` changes the reminder window from the default 10 minutes. Without subscriptions, `--queue 1..6` and `--subqueue 1..2` select the queue shown in the message (defaults `5.1`). With subscriptions, each configured queue is used and these two flags are unavailable. A reminder sends only if its transition falls after the selected time and within the lead window. `schedule-and-off` sends a revision to each subscribed queue and an off reminder only to queues approaching their fixed outage start. The scenarios use a demo fixture derived from all 12 POE queues captured on 6 October 2026. Three rows were adjusted to follow the cycle rules below. `schedule-change` extends today's first outage by 30 minutes; `today-shorter` and `tomorrow-change` shorten an outage by 30 minutes. `double-change` shortens one tomorrow outage and extends another in the same message. These revision cases keep outage starts fixed and move each 30-minute tentative return period with the corresponding outage end. Each command starts a temporary local POE mock server, fetches its GET endpoint once, and uses isolated state, so it does not call live POE or change the mock builder at `127.0.0.1:3010` or the worker's saved state.

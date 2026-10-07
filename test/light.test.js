@@ -106,6 +106,14 @@ test("light config can keep yellow periods tentative", async () => {
   assert.equal(config.job.treatYellowAsGreen, false);
 });
 
+test("light image layout defaults to horizontal and accepts vertical", async () => {
+  const dir = await createTempDir();
+  assert.equal(buildLightConfig(dir).job.scheduleImageLayout, "horizontal");
+  assert.equal(buildLightConfig(dir, { LIGHT_SCHEDULE_IMAGE_LAYOUT: "vertical" }).job.scheduleImageLayout, "vertical");
+  assert.throws(() => buildLightConfig(dir, { LIGHT_SCHEDULE_IMAGE_LAYOUT: "diagonal" }),
+    /LIGHT_SCHEDULE_IMAGE_LAYOUT must be horizontal or vertical/);
+});
+
 test("light config defaults Gemini to flash lite latest model", async () => {
   const dir = await createTempDir();
   const config = buildLightConfig(dir, {

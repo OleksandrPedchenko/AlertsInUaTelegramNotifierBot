@@ -7,7 +7,7 @@ const { describeLightScheduleChange } = require("./geminiClient");
 const { effectiveDay, effectiveSchedule } = require("./effectiveSchedule");
 const { buildDayLightNotification, buildOutageReminderNotification } = require("./messageCatalog");
 const { parseLightSchedule } = require("./parser");
-const { renderScheduleImage } = require("./scheduleImage");
+const { renderScheduleImage, renderVerticalScheduleImage } = require("./scheduleImage");
 
 async function fetchPoeData(config, deps) {
   const getResponse = await deps.requestWithRetry({
@@ -393,7 +393,9 @@ const lightPlugin = {
           ? effectiveDay(prior, currentState.treatYellowAsGreen) : null;
         const current = visibleState[day];
         try {
-          notification.photo = await renderScheduleImage({
+          const renderImage = config.job.scheduleImageLayout === "vertical"
+            ? renderVerticalScheduleImage : renderScheduleImage;
+          notification.photo = await renderImage({
             queue: currentState.queue, subQueue: currentState.subQueue,
             day, previous, current,
             scheduleDate: currentState.scheduleDate
