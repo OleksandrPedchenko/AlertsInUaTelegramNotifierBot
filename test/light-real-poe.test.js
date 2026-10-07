@@ -26,7 +26,7 @@ test("real POE command fetches only the official schedule and uses isolated pers
     return Promise.resolve(createTextResponse(200, String(url).endsWith("dynamicgpv-info.php") ? html : "OK"));
   };
   const env = {
-    TG_BOT_TOKEN: "test-token", LIGHT_TG_CHAT_ID: "demo-chat", LIGHT_SCHEDULE_IMAGE_ENABLED: "false",
+    TG_BOT_TOKEN: "test-token", LIGHT_TG_CHAT_ID: "demo-chat", LIGHT_PIN_TODAY_SCHEDULE: "false", LIGHT_SCHEDULE_IMAGE_ENABLED: "false",
     LIGHT_POE_URL: "http://127.0.0.1:3010/customs/dynamicgpv-info.php",
     LIGHT_USE_STUB: "true"
   };

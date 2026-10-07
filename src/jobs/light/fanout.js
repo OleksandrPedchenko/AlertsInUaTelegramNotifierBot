@@ -274,6 +274,7 @@ async function runFanout(env = process.env, options = {}) {
       try {
         if (!lightPlugin.shouldNotify({ previousState: item.previousState, changed: item.changed, config: item.config, currentState: item.currentState })) {
           await writeJobState(config.job.stateFilePath, item.stateKey, item.currentState, item.fingerprint);
+          await lightPlugin.syncTodayPin({ config: item.config, stateKey: item.stateKey, currentState: item.currentState, deps });
           continue;
         }
         const deliveryDeps = {
@@ -293,7 +294,13 @@ async function runFanout(env = process.env, options = {}) {
           const chatId = item.config.telegram.chatId;
           const waitMs = 1100 - (Date.now() - (lastSentAt.get(chatId) || 0));
           if (waitMs > 0) await new Promise(resolve => setTimeout(resolve, waitMs));
-          const delivered = await sendTelegramNotification(notification, item.config.telegram, deps);
+          const delivered = await sendTelegramNotification(notification, item.config.telegram, {
+            ...deps,
+            onSent: (message, kind) => lightPlugin.afterTelegramSend({
+              config: item.config, stateKey: item.stateKey, previousState: item.previousState,
+              currentState: item.currentState, notification, message, kind, deps
+            })
+          });
           lastSentAt.set(chatId, Date.now());
           notificationCount += delivered;
           logger.info("Light notification delivered", {
@@ -308,6 +315,7 @@ async function runFanout(env = process.env, options = {}) {
           const savedState = updated || item.currentState;
           await writeJobState(config.job.stateFilePath, item.stateKey, savedState,
             lightPlugin.getStateFingerprint(savedState));
+          await lightPlugin.syncTodayPin({ config: item.config, stateKey: item.stateKey, currentState: item.currentState, deps });
         }
       } catch (error) {
         failures.push(item.stateKey);

@@ -8,6 +8,7 @@ const { effectiveDay, effectiveSchedule } = require("./effectiveSchedule");
 const { buildDayLightNotification, buildOutageReminderNotification } = require("./messageCatalog");
 const { parseLightSchedule } = require("./parser");
 const { renderScheduleImage, renderVerticalScheduleImage } = require("./scheduleImage");
+const { rememberInitialTodayPost, syncTodayPin } = require("./todayPin");
 
 async function fetchPoeData(config, deps) {
   const getResponse = await deps.requestWithRetry({
@@ -268,6 +269,26 @@ const lightPlugin = {
 
   getStateFingerprint(state) {
     return JSON.stringify(normalizeScheduleForFingerprint(state));
+  },
+
+  async afterTelegramSend({ config, stateKey, previousState, currentState, notification, message, kind, deps }) {
+    try {
+      await rememberInitialTodayPost({
+        config, stateKey, currentState,
+        previousDay: previousScheduleForDay(previousState, currentState, "today"),
+        notification, message, kind
+      });
+    } catch (error) {
+      deps.logger.warn("Could not remember today's schedule post for pinning", { reason: error.message });
+    }
+  },
+
+  async syncTodayPin({ config, stateKey, currentState, deps }) {
+    try {
+      await syncTodayPin({ config, stateKey, currentState, deps });
+    } catch (error) {
+      deps.logger.warn("Could not synchronize today's pinned schedule", { reason: error.message });
+    }
   },
 
   shouldNotify({ previousState, config, currentState }) {

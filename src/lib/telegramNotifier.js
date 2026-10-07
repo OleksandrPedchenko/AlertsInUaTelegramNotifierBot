@@ -48,6 +48,7 @@ async function sendTelegramPhoto(png, caption, config, options = {}) {
       retriable: isRetriableStatus(response.body?.error_code)
     });
   }
+  return response.body.result;
 }
 
 async function sendTelegramMessage(text, config, options = {}) {
@@ -93,17 +94,24 @@ async function sendTelegramMessage(text, config, options = {}) {
       retriable: isRetriableStatus(errorCode)
     });
   }
+  return response.body.result;
+}
+
+function telegramCaptionLength(text) {
+  return text
+    .replace(/<[^>]*>/g, "")
+    .replace(/&(?:amp|lt|gt|quot|apos);/g, " ").length;
 }
 
 async function sendTelegramNotification(notification, config, options = {}) {
-  const captionLength = notification.text
-    .replace(/<[^>]*>/g, "")
-    .replace(/&(?:amp|lt|gt|quot|apos);/g, " ").length;
+  const captionLength = telegramCaptionLength(notification.text);
   if (notification.photo && captionLength <= 1024) {
-    await sendTelegramPhoto(notification.photo, notification.text, config, options);
+    const message = await sendTelegramPhoto(notification.photo, notification.text, config, options);
+    await options.onSent?.(message, "photo");
   } else {
     if (notification.photo) options.logger?.warn?.("Schedule caption exceeds Telegram limit; sending full text", { captionLength });
-    await sendTelegramMessage(notification.text, config, options);
+    const message = await sendTelegramMessage(notification.text, config, options);
+    await options.onSent?.(message, "text");
   }
   return 1;
 }
@@ -124,5 +132,6 @@ module.exports = {
   TelegramNotifier,
   sendTelegramMessage,
   sendTelegramPhoto,
-  sendTelegramNotification
+  sendTelegramNotification,
+  telegramCaptionLength
 };

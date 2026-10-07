@@ -82,6 +82,7 @@ test("vertical layout can be selected for live schedule posts", async () => {
     caseName: "initial",
     env: {
       TG_BOT_TOKEN: "token", TG_CHAT_ID: "chat", LIGHT_SCHEDULE_IMAGE_LAYOUT: "vertical",
+      LIGHT_PIN_TODAY_SCHEDULE: "false",
       LIGHT_GEMINI_ENABLED: "false"
     },
     fetchImpl: async (url, options) => {
@@ -123,7 +124,7 @@ test("initial today and tomorrow schedules are separate photo posts with full ca
   const result = await runScenario({
     caseName: "initial",
     env: {
-      TG_BOT_TOKEN: "token", TG_CHAT_ID: "chat", LIGHT_SCHEDULE_IMAGE_ENABLED: "true",
+      TG_BOT_TOKEN: "token", TG_CHAT_ID: "chat", LIGHT_PIN_TODAY_SCHEDULE: "false", LIGHT_SCHEDULE_IMAGE_ENABLED: "true",
       LIGHT_GEMINI_ENABLED: "false"
     },
     fetchImpl: async (url, options) => {
@@ -208,7 +209,7 @@ test("fan-out sends one generated schedule photo to each subscribed chat", async
     caseName: "initial",
     env: {
       TG_BOT_TOKEN: "token", LIGHT_SUBSCRIPTIONS_FILE: subscriptionsFile,
-      LIGHT_SCHEDULE_IMAGE_ENABLED: "true", LIGHT_GEMINI_ENABLED: "false"
+      LIGHT_PIN_TODAY_SCHEDULE: "false", LIGHT_SCHEDULE_IMAGE_ENABLED: "true", LIGHT_GEMINI_ENABLED: "false"
     },
     fetchImpl: async (url, options) => {
       if (!String(url).includes("api.telegram.org")) return fetch(url, options);
@@ -229,7 +230,7 @@ test("schedule revision keeps the Gemini summary and full periods in its photo c
     caseName: "today-shorter",
     env: {
       TG_BOT_TOKEN: "token", TG_CHAT_ID: "chat", GEMINI_API_KEY: "gemini-key",
-      LIGHT_SCHEDULE_IMAGE_ENABLED: "true"
+      LIGHT_PIN_TODAY_SCHEDULE: "false", LIGHT_SCHEDULE_IMAGE_ENABLED: "true"
     },
     fetchImpl: async (url, options) => {
       if (String(url).includes("api.telegram.org")) {
@@ -255,7 +256,7 @@ test("new tomorrow schedule sends only tomorrow's photo with full text caption",
   const deliveries = [];
   await runScenario({
     caseName: "tomorrow-appears",
-    env: { TG_BOT_TOKEN: "token", TG_CHAT_ID: "chat", LIGHT_SCHEDULE_IMAGE_ENABLED: "true" },
+    env: { TG_BOT_TOKEN: "token", TG_CHAT_ID: "chat", LIGHT_PIN_TODAY_SCHEDULE: "false", LIGHT_SCHEDULE_IMAGE_ENABLED: "true" },
     fetchImpl: async (url, options) => {
       if (!String(url).includes("api.telegram.org")) return fetch(url, options);
       deliveries.push({ url: String(url), body: options.body });

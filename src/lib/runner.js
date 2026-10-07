@@ -147,6 +147,7 @@ async function runPluginJob(plugin, env = process.env, options = {}) {
       await writeJobState(stateFilePath, stateKey, currentState, currentFingerprint, {
         jobName: plugin.name
       });
+      await plugin.syncTodayPin?.({ config, stateKey, currentState, deps });
       logger.info("State unchanged; notification skipped", {
         jobName: plugin.name,
         stateKey,
@@ -176,6 +177,7 @@ async function runPluginJob(plugin, env = process.env, options = {}) {
       await writeJobState(stateFilePath, stateKey, currentState, currentFingerprint, {
         jobName: plugin.name
       });
+      await plugin.syncTodayPin?.({ config, stateKey, currentState, deps });
       logger.info("Notification text is empty; notification skipped", {
         jobName: plugin.name,
         stateKey
@@ -192,7 +194,10 @@ async function runPluginJob(plugin, env = process.env, options = {}) {
     for (const notification of notifications) {
       deliveredMessages += await sendTelegramNotification(notification, config.telegram, {
         fetchImpl: options.fetchImpl,
-        logger
+        logger,
+        onSent: (message, kind) => plugin.afterTelegramSend?.({
+          config, stateKey, previousState, currentState, notification, message, kind, deps
+        })
       });
       const updatedState = typeof plugin.afterNotificationSuccess === "function"
         ? await plugin.afterNotificationSuccess({
@@ -211,8 +216,8 @@ async function runPluginJob(plugin, env = process.env, options = {}) {
       await writeJobState(stateFilePath, stateKey, stateToSave, plugin.getStateFingerprint(stateToSave), {
         jobName: plugin.name
       });
+      await plugin.syncTodayPin?.({ config, stateKey, currentState, deps });
     }
-
     logger.info("Notification step completed", {
       jobName: plugin.name,
       notificationCount: deliveredMessages,
