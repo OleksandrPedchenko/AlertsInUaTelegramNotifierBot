@@ -251,6 +251,7 @@ test("live revision scenario batches subscribed queues in one Gemini request", a
   assert.equal(poeGets, 1);
   assert.equal(geminiCalls, 1);
   assert.match(geminiPrompt, /🟢 Відключення скорочено/);
+  assert.doesNotMatch(geminiPrompt, /Світло є з нового часу кінця/);
   assert.doesNotMatch(geminiPrompt, /"state":3/);
   assert.deepEqual(messages.map(message => message.chat_id), ["chat-five", "chat-six"]);
   assert.match(messages[0].text, /Зміна для 5\.1/);
