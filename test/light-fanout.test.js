@@ -30,7 +30,7 @@ test("fan-out fetches POE once and batches changed queues into one Gemini call",
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
   const env = {
-    TG_BOT_TOKEN: "test-token", GEMINI_API_KEY: "test-gemini",
+    TG_BOT_TOKEN: "test-token", GEMINI_API_KEY: "test-gemini", LIGHT_SCHEDULE_IMAGE_ENABLED: "false",
     LIGHT_SUBSCRIPTIONS_FILE: subscriptionsFile,
     LIGHT_POE_URL: `${base}/customs/dynamicgpv-info.php`,
     LIGHT_STATE_FILE_PATH: path.join(dir, "state.json"),
@@ -101,7 +101,7 @@ test("tomorrow-only changes get a separate tomorrow message", async () => {
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
   const env = {
-    TG_BOT_TOKEN: "test-token", GEMINI_API_KEY: "test-gemini", LIGHT_SUBSCRIPTIONS_FILE: file,
+    TG_BOT_TOKEN: "test-token", GEMINI_API_KEY: "test-gemini", LIGHT_SUBSCRIPTIONS_FILE: file, LIGHT_SCHEDULE_IMAGE_ENABLED: "false",
     LIGHT_TREAT_YELLOW_AS_GREEN: "false",
     LIGHT_POE_URL: `${base}/customs/dynamicgpv-info.php`,
     LIGHT_STATE_FILE_PATH: path.join(dir, "state.json"),
@@ -177,7 +177,7 @@ test("fan-out skips Gemini when tomorrow first appears but uses it for a later r
   const state = createDefaultState();
   await fs.writeFile(stubFile, renderPoeHtml(state));
   const env = {
-    TG_BOT_TOKEN: "test-token", GEMINI_API_KEY: "test-gemini",
+    TG_BOT_TOKEN: "test-token", GEMINI_API_KEY: "test-gemini", LIGHT_SCHEDULE_IMAGE_ENABLED: "false",
     LIGHT_SUBSCRIPTIONS_FILE: subscriptionsFile,
     LIGHT_USE_STUB: "true", LIGHT_STUB_FILE: stubFile,
     LIGHT_STATE_FILE_PATH: path.join(dir, "state.json"),
@@ -272,7 +272,7 @@ test("a failed group retries without resending successful groups", async () => {
   const server = createMockServer();
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const env = {
-    TG_BOT_TOKEN: "test-token", LIGHT_SUBSCRIPTIONS_FILE: file,
+    TG_BOT_TOKEN: "test-token", LIGHT_SUBSCRIPTIONS_FILE: file, LIGHT_SCHEDULE_IMAGE_ENABLED: "false",
     LIGHT_POE_URL: `http://127.0.0.1:${server.address().port}/customs/dynamicgpv-info.php`,
     LIGHT_STATE_FILE_PATH: path.join(dir, "state.json"),
     LIGHT_LOCK_FILE_PATH: path.join(dir, "light.lock"),
@@ -310,7 +310,7 @@ test("Gemini rate limit uses raw diff and cools down across retry runs", async (
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
   const env = {
-    TG_BOT_TOKEN: "test-token", GEMINI_API_KEY: "test-gemini", LIGHT_SUBSCRIPTIONS_FILE: file,
+    TG_BOT_TOKEN: "test-token", GEMINI_API_KEY: "test-gemini", LIGHT_SUBSCRIPTIONS_FILE: file, LIGHT_SCHEDULE_IMAGE_ENABLED: "false",
     LIGHT_POE_URL: `${base}/customs/dynamicgpv-info.php`,
     LIGHT_STATE_FILE_PATH: path.join(dir, "state.json"),
     LIGHT_LOCK_FILE_PATH: path.join(dir, "light.lock"),
@@ -362,7 +362,7 @@ test("fan-out sends off and on reminders once for their respective chats", async
   const server = createMockServer(state);
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const env = {
-    TG_BOT_TOKEN: "test-token", LIGHT_SUBSCRIPTIONS_FILE: file,
+    TG_BOT_TOKEN: "test-token", LIGHT_SUBSCRIPTIONS_FILE: file, LIGHT_SCHEDULE_IMAGE_ENABLED: "false",
     LIGHT_POE_URL: `http://127.0.0.1:${server.address().port}/customs/dynamicgpv-info.php`,
     LIGHT_STATE_FILE_PATH: path.join(dir, "state.json"),
     LIGHT_LOCK_FILE_PATH: path.join(dir, "light.lock"),

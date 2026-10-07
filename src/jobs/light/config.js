@@ -221,6 +221,7 @@ function loadLightConfig(_env, readers) {
       stubFilePath: readers.readResolvedPath("LIGHT_STUB_FILE", "light-example.html"),
       useStub,
       treatYellowAsGreen: readers.readBoolean("LIGHT_TREAT_YELLOW_AS_GREEN", true),
+      scheduleImageEnabled: readers.readBoolean("LIGHT_SCHEDULE_IMAGE_ENABLED", true),
       alwaysSendTgMessage: readers.readBoolean("LIGHT_ALWAYS_SEND_TG_MESSAGE", false),
       outageReminderBeforeMinutes: readers.readNumber("LIGHT_OUTAGE_REMINDER_BEFORE_MINUTES", 0, {
         integer: true,

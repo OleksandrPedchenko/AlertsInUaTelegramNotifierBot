@@ -52,6 +52,7 @@ function buildLightConfig(dir, overrides = {}) {
   const env = {
     TG_BOT_TOKEN: "tg-token",
     TG_CHAT_ID: "tg-chat",
+    LIGHT_SCHEDULE_IMAGE_ENABLED: "false",
     LIGHT_QUEUE: "2",
     LIGHT_SUB_QUEUE: "2",
     LIGHT_LOCK_FILE_PATH: path.join(dir, "light.lock"),

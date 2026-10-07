@@ -5,8 +5,9 @@ const { HttpRequestError } = require("../../lib/httpClient");
 const { loadLightConfig } = require("./config");
 const { describeLightScheduleChange } = require("./geminiClient");
 const { effectiveDay, effectiveSchedule } = require("./effectiveSchedule");
-const { buildDayLightNotification, buildLightNotification, buildOutageReminderNotification } = require("./messageCatalog");
+const { buildDayLightNotification, buildLightNotification, buildOutageReminderNotification, escapeHtml } = require("./messageCatalog");
 const { parseLightSchedule } = require("./parser");
+const { renderScheduleImage } = require("./scheduleImage");
 
 async function fetchPoeData(config, deps) {
   const getResponse = await deps.requestWithRetry({
@@ -379,6 +380,33 @@ const lightPlugin = {
         type: "outage-reminder",
         text: buildOutageReminderNotification(visibleState, currentState.pendingOutageReminder)
       });
+    }
+
+    if (config.job.scheduleImageEnabled) {
+      for (const notification of notifications) {
+        if (!notification.type.startsWith("schedule-change")) continue;
+        const day = notification.type.split(":")[1] ||
+          (visibleState.tomorrow.timePeriods.length ? "both" : "today");
+        const prior = day === "both" ? null : previousScheduleForDay(previousState, currentState, day);
+        const previous = prior?.timePeriods?.length
+          ? effectiveDay(prior, currentState.treatYellowAsGreen) : null;
+        const current = day === "both" ? visibleState : visibleState[day];
+        try {
+          notification.photo = await renderScheduleImage({
+            queue: currentState.queue, subQueue: currentState.subQueue,
+            day, previous, current, currentMinute: currentState.currentMinute
+          });
+        } catch (error) {
+          deps.logger.warn("Schedule image rendering failed; sending text schedule", {
+            queue: currentState.queue, subQueue: currentState.subQueue, day, reason: error.message
+          });
+          continue;
+        }
+        const title = notification.text.split("\n")[0];
+        const summary = day === "both" ? "" : Array.from(summaries[day] || "").slice(0, 700).join("");
+        notification.text = [title, summary ? `\n${escapeHtml(summary)}` : "",
+          currentState.updatedAt ? `\n🕒 ${escapeHtml(currentState.updatedAt)}` : ""].join("");
+      }
     }
 
     return notifications;

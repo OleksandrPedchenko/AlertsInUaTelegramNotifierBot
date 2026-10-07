@@ -65,7 +65,7 @@ test("light worker fetches only the local mock schedule and sends a schedule mes
   const base = `http://127.0.0.1:${server.address().port}`;
   const dir = await createTempDir();
   const env = {
-    TG_BOT_TOKEN: "test-token", TG_CHAT_ID: "test-chat",
+    TG_BOT_TOKEN: "test-token", TG_CHAT_ID: "test-chat", LIGHT_SCHEDULE_IMAGE_ENABLED: "false",
     LIGHT_POE_URL: `${base}/customs/dynamicgpv-info.php`,
     LIGHT_LOCK_FILE_PATH: path.join(dir, "light.lock"),
     LIGHT_STATE_FILE_PATH: path.join(dir, "state.json"),

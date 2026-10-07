@@ -10,6 +10,7 @@ const { createTempDir, createTextResponse } = require("./helpers");
 
 const baseEnv = {
   TG_BOT_TOKEN: "test-token",
+  LIGHT_SCHEDULE_IMAGE_ENABLED: "false",
   LIGHT_TG_CHAT_ID: "demo-chat",
   LIGHT_TREAT_YELLOW_AS_GREEN: "false",
   GEMINI_API_KEY: "test-gemini-key"
