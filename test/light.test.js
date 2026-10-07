@@ -7,13 +7,13 @@ const test = require("node:test");
 
 const { createEnvReader } = require("../src/lib/config");
 const { runPluginJob } = require("../src/lib/runner");
-const { writeJobState } = require("../src/lib/stateStore");
+const { readJobState, writeJobState } = require("../src/lib/stateStore");
 const { loadLightConfig } = require("../src/jobs/light/config");
 const { effectiveSchedule } = require("../src/jobs/light/effectiveSchedule");
-const { buildGeminiPrompt } = require("../src/jobs/light/geminiClient");
+const { buildGeminiPrompt, changedWindowsForPrompt, trimPeriodsForPrompt } = require("../src/jobs/light/geminiClient");
 const { createDefaultState, createMockServer, renderPoeHtml } = require("../src/jobs/light/mockServer");
 const { parseLightSchedule } = require("../src/jobs/light/parser");
-const { findPendingOutageReminder, getChangedDays, lightPlugin, previousScheduleForDay } = require("../src/jobs/light/plugin");
+const { findPendingOutageReminder, getChangedDays, getRelevantChangedDays, lightPlugin, previousScheduleForDay } = require("../src/jobs/light/plugin");
 const { createMemoryLogger, createSilentLogger, createTempDir, createTextResponse } = require("./helpers");
 
 function row(statuses) {
@@ -135,6 +135,26 @@ test("single-queue Gemini prompt follows green treatment of yellow", () => {
   assert.match(prompt, /Жовтий період POE.*світлом/);
   assert.match(prompt, /🟢.*Відключення скорочено/);
   assert.doesNotMatch(prompt, /"state":3/);
+});
+
+test("Gemini context keeps one prior cell and the full outage crossing it", () => {
+  const old = [
+    { state: 2, startMin: 0, endMin: 30 },
+    { state: 1, startMin: 30, endMin: 900 },
+    { state: 2, startMin: 900, endMin: 960 },
+    { state: 1, startMin: 960, endMin: 1440 }
+  ];
+  const now = [
+    { state: 1, startMin: 0, endMin: 900 },
+    { state: 2, startMin: 900, endMin: 990 },
+    { state: 1, startMin: 990, endMin: 1440 }
+  ];
+  assert.deepEqual(trimPeriodsForPrompt(old, 970)[0], { state: 2, startMin: 900, endMin: 960 });
+  assert.deepEqual(changedWindowsForPrompt(old, now, 970), [
+    { startMin: 960, endMin: 990, oldState: 1, newState: 2 }
+  ]);
+  assert.deepEqual(changedWindowsForPrompt(old, now, 990), []);
+  assert.equal(trimPeriodsForPrompt(old, null).length, 4);
 });
 
 test("light config allows localhost http mock URLs only", async () => {
@@ -294,6 +314,46 @@ test("day comparison follows calendar dates across midnight", () => {
   assert.equal(previousScheduleForDay(previous, current, "tomorrow"), null);
 });
 
+test("today ignores past-only cells but keeps the current cell and all of tomorrow", () => {
+  const day = cells => ({ timePeriods: cells.map((status, index) => ({
+    status, startMin: index * 30, endMin: (index + 1) * 30,
+    time: `${String(Math.floor(index / 2)).padStart(2, "0")}:${index % 2 ? "30" : "00"} - ${String(Math.floor((index + 1) / 2)).padStart(2, "0")}:${(index + 1) % 2 ? "30" : "00"}`,
+    durationMinutes: 30
+  })) });
+  const previous = { scheduleDate: "2026-10-07", today: day([2, 1, 1, 1]), tomorrow: day([1, 1, 1, 1]) };
+  const current = { scheduleDate: "2026-10-07", currentMinute: 75, treatYellowAsGreen: true,
+    today: day([1, 1, 1, 1]), tomorrow: day([1, 2, 1, 1]) };
+  assert.deepEqual(getRelevantChangedDays(previous, current), ["tomorrow"]);
+  current.today = day([1, 1, 2, 1]);
+  assert.deepEqual(getRelevantChangedDays(previous, current), ["today", "tomorrow"]);
+  current.currentMinute = 90;
+  assert.deepEqual(getRelevantChangedDays(previous, current), ["tomorrow"]);
+});
+
+test("single-queue runner saves a past-only revision without Telegram or Gemini", async () => {
+  const dir = await createTempDir();
+  const oldHtml = createPoeHtml([2, 1, 1, 1]);
+  const newHtml = createPoeHtml([1, 1, 1, 1]);
+  const config = buildLightConfig(dir, { LIGHT_CURRENT_MINUTE: "100", GEMINI_API_KEY: "test-key" });
+  const previous = parseLightSchedule(oldHtml, 2, 2);
+  await writeJobState(config.job.stateFilePath, lightPlugin.getStateKey(config), previous,
+    lightPlugin.getStateFingerprint(previous));
+  let telegram = 0;
+  let gemini = 0;
+  const result = await runPluginJob(lightPlugin, {}, { config, logger: createSilentLogger(),
+    fetchImpl: async (url) => {
+      if (String(url).includes("api.telegram.org")) telegram++;
+      if (String(url).includes("generativelanguage.googleapis.com")) gemini++;
+      return createTextResponse(200, newHtml);
+    }
+  });
+  assert.equal(result.notified, false);
+  assert.equal(telegram, 0);
+  assert.equal(gemini, 0);
+  const saved = await readJobState(config.job.stateFilePath, lightPlugin.getStateKey(config));
+  assert.equal(saved.state.today.timePeriods[0].status, 1);
+});
+
 test("light runner skips notification when selected queue fingerprint is unchanged", async () => {
   const dir = await createTempDir();
   const html = createPoeHtml();
@@ -350,7 +410,7 @@ test("strict light mode preserves yellow and detects its change to green", async
   const dir = await createTempDir();
   const oldHtml = createPoeHtml([2, 3, 1, 1]);
   const newHtml = createPoeHtml([2, 1, 1, 1]);
-  const config = buildLightConfig(dir, { LIGHT_TREAT_YELLOW_AS_GREEN: "false" });
+  const config = buildLightConfig(dir, { LIGHT_TREAT_YELLOW_AS_GREEN: "false", LIGHT_CURRENT_MINUTE: "0" });
   const messages = [];
   await runPluginJob(lightPlugin, {}, {
     config, logger: createSilentLogger(),
@@ -463,7 +523,7 @@ test("light runner sends Telegram notification when selected queue schedule chan
   const dir = await createTempDir();
   const oldHtml = createPoeHtml([1, 1, 2, 3]);
   const newHtml = createPoeHtml([2, 2, 1, 1]);
-  const config = buildLightConfig(dir);
+  const config = buildLightConfig(dir, { LIGHT_CURRENT_MINUTE: "0" });
   const previousState = {
     ...parseLightSchedule(oldHtml, config.poe.queue, config.poe.subQueue),
     sourceUrl: config.poe.url,
@@ -509,7 +569,7 @@ test("light runner retries an unsent schedule change on the next run", async () 
   const dir = await createTempDir();
   const oldHtml = createPoeHtml([1, 1, 2, 3]);
   const newHtml = createPoeHtml([2, 2, 1, 1]);
-  const config = buildLightConfig(dir, { LIGHT_TG_HTTP_MAX_RETRIES: "0" });
+  const config = buildLightConfig(dir, { LIGHT_TG_HTTP_MAX_RETRIES: "0", LIGHT_CURRENT_MINUTE: "0" });
   const previousState = parseLightSchedule(oldHtml, 2, 2);
   await writeJobState(config.job.stateFilePath, lightPlugin.getStateKey(config), previousState, lightPlugin.getStateFingerprint(previousState));
   await assert.rejects(runPluginJob(lightPlugin, {}, {
@@ -531,7 +591,7 @@ test("light runner retries only tomorrow when its second day message fails", asy
   const dir = await createTempDir();
   const oldHtml = createPoeHtml([1, 1, 1, 1], [1, 1, 1]);
   const newHtml = createPoeHtml([2, 2, 1, 1], [1, 2, 1]);
-  const config = buildLightConfig(dir, { LIGHT_TG_HTTP_MAX_RETRIES: "0" });
+  const config = buildLightConfig(dir, { LIGHT_TG_HTTP_MAX_RETRIES: "0", LIGHT_CURRENT_MINUTE: "0" });
   const previousState = parseLightSchedule(oldHtml, 2, 2);
   await writeJobState(config.job.stateFilePath, lightPlugin.getStateKey(config), previousState,
     lightPlugin.getStateFingerprint(previousState));
@@ -612,6 +672,7 @@ test("light runner asks Gemini to explain changed segments when configured", asy
   const config = buildLightConfig(dir, {
     LIGHT_GEMINI_API_KEY: "gemini-key",
     LIGHT_TREAT_YELLOW_AS_GREEN: "false",
+    LIGHT_CURRENT_MINUTE: "0",
     LIGHT_GEMINI_RETRY_BASE_DELAY_MS: "100"
   });
   const previousState = {

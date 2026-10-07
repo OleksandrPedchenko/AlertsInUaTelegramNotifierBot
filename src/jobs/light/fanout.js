@@ -10,10 +10,10 @@ const { normalizeNotifications } = require("../../lib/runner");
 const { readJobState, writeJobState } = require("../../lib/stateStore");
 const { sendTelegramNotification } = require("../../lib/telegramNotifier");
 const { loadLightConfig } = require("./config");
-const { buildGeminiUrl, extractGeminiText, normalizePeriodForPrompt } = require("./geminiClient");
+const { buildGeminiUrl, changedWindowsForPrompt, extractGeminiText, trimPeriodsForPrompt } = require("./geminiClient");
 const { effectiveDay } = require("./effectiveSchedule");
 const { parseLightSchedule } = require("./parser");
-const { buildCurrentLightState, dateFromCurrentMinute, dayFingerprint, fetchPoeData, getChangedDays, getCurrentMinute, lightPlugin, previousScheduleForDay, readStubData } = require("./plugin");
+const { buildCurrentLightState, dateFromCurrentMinute, dayFingerprint, fetchPoeData, getRelevantChangedDays, getCurrentMinute, lightPlugin, previousScheduleForDay, readStubData } = require("./plugin");
 
 async function loadSubscriptions(filePath) {
   let data;
@@ -86,11 +86,13 @@ function batchPrompt(items) {
     id: item.batchId,
     day: item.day,
     currentMinute: item.day === "today" ? item.currentState.currentMinute : null,
-    old: item.previousDay.timePeriods.map(normalizePeriodForPrompt),
-    now: item.currentDay.timePeriods.map(normalizePeriodForPrompt)
+    old: trimPeriodsForPrompt(item.previousDay.timePeriods, item.day === "today" ? item.currentState.currentMinute : null),
+    now: trimPeriodsForPrompt(item.currentDay.timePeriods, item.day === "today" ? item.currentState.currentMinute : null),
+    changes: changedWindowsForPrompt(item.previousDay.timePeriods, item.currentDay.timePeriods,
+      item.day === "today" ? item.currentState.currentMinute : null)
   }));
   return [
-    "Поясни українською зміни графіка світла окремо для кожного id.",
+    "Поясни українською лише зміни з поля changes окремо для кожного id. old і now — контекст, не шукай у них додаткових змін.",
     treatYellowAsGreen
       ? "Стани: 1=світло є (включно з жовтим періодом POE), 2=немає."
       : "Стани: 1=світло є, 2=немає, 3=невизначений час повернення світла одразу після червоного відключення.",
@@ -111,7 +113,7 @@ function batchPrompt(items) {
     treatYellowAsGreen
       ? "Жовтий період POE тут свідомо вважається часом зі світлом. Не вигадуй причини, поради чи зміни, яких немає."
       : "Не обіцяй, що світло точно буде у стані 3. Не вигадуй причини, поради чи зміни, яких немає.",
-    "Для сьогодні ігноруй зміни, що повністю минули до currentMinute; для завтра аналізуй всю добу.",
+    "Для сьогодні передані сегменти від попереднього 30-хвилинного слота. Не описуй зміни, що повністю минули до currentMinute, але збережи повний початок і старий/новий кінець актуального відключення. Для завтра аналізуй всю добу.",
     "Відповідь: лише JSON object, де ключ — точний id, значення — короткий текст про зміни без заголовка.",
     JSON.stringify(changes)
   ].join("\n");
@@ -153,7 +155,7 @@ async function prepareGeminiSummaries(items, config, deps) {
   for (const item of items) {
     item.changeCacheKeys = {};
     if (!item.previousState) continue;
-    for (const day of getChangedDays(item.previousState, item.currentState)) {
+    for (const day of getRelevantChangedDays(item.previousState, item.currentState)) {
       const previousDay = previousScheduleForDay(item.previousState, item.currentState, day);
       if (!previousDay?.timePeriods?.length) continue;
       const change = { ...item, day,

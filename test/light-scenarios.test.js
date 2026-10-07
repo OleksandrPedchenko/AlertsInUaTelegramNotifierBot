@@ -58,6 +58,45 @@ test("Gemini cases require an API key before sending", async () => {
   );
 });
 
+test("fan-out skips a past-only today revision before Telegram and Gemini", async () => {
+  const dir = await createTempDir();
+  const subscriptionsFile = path.join(dir, "subscriptions.json");
+  await fs.writeFile(subscriptionsFile, JSON.stringify({ queues: {
+    "5.1": { enabled: true, chatIds: ["demo-chat"] }
+  } }));
+  const result = await execute("today-shorter", "19:00", { LIGHT_SUBSCRIPTIONS_FILE: subscriptionsFile });
+  assert.equal(result.result.notificationCount, 0);
+  assert.equal(result.messages.length, 0);
+  assert.equal(result.geminiCalls, 0);
+});
+
+test("fan-out Gemini input keeps one prior cell and only relevant change windows", async () => {
+  const dir = await createTempDir();
+  const subscriptionsFile = path.join(dir, "subscriptions.json");
+  await fs.writeFile(subscriptionsFile, JSON.stringify({ queues: {
+    "5.1": { enabled: true, chatIds: ["demo-chat"] }
+  } }));
+  let prompt;
+  await runScenario({ caseName: "schedule-change", time: "15:45",
+    env: { ...baseEnv, LIGHT_SUBSCRIPTIONS_FILE: subscriptionsFile, LIGHT_TREAT_YELLOW_AS_GREEN: "true" },
+    fetchImpl: async (url, options) => {
+      if (String(url).includes("generativelanguage.googleapis.com")) {
+        prompt = JSON.parse(options.body).contents[0].parts[0].text;
+        return createTextResponse(200, JSON.stringify({ candidates: [{ content: { parts: [{
+          text: JSON.stringify({ "5.1:today": "🔴 Відключення продовжено до 16:30 (було до 16:00)." })
+        }] } }] }));
+      }
+      if (String(url).includes("api.telegram.org")) {
+        return createTextResponse(200, JSON.stringify({ ok: true }));
+      }
+      return fetch(url, options);
+    }
+  });
+  const [item] = JSON.parse(prompt.split("\n").at(-1));
+  assert.equal(item.old[0].startMin, 900);
+  assert.deepEqual(item.changes, [{ startMin: 960, endMin: 990, oldState: 1, newState: 2 }]);
+});
+
 test("scenario fixture keeps fixed six-hour outage starts and a half-hour return period", () => {
   for (const [day, queues] of Object.entries(scenarioSchedule.days)) {
     for (const [queue, cells] of Object.entries(queues)) {

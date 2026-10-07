@@ -48,6 +48,35 @@ function normalizePeriodForPrompt(period) {
   };
 }
 
+function trimPeriodsForPrompt(periods, currentMinute) {
+  const normalized = periods.map(normalizePeriodForPrompt);
+  if (!Number.isInteger(currentMinute)) return normalized;
+  const cutoff = Math.max(0, Math.floor(currentMinute / 30) * 30 - 30);
+  return normalized.filter(period => period.endMin > cutoff);
+}
+
+function changedWindowsForPrompt(previousPeriods, currentPeriods, currentMinute) {
+  const old = previousPeriods.map(normalizePeriodForPrompt);
+  const now = currentPeriods.map(normalizePeriodForPrompt);
+  const stateAt = (periods, minute) => periods.find(period =>
+    period.startMin <= minute && minute < period.endMin)?.state;
+  const windows = [];
+  for (let startMin = 0; startMin < 1440; startMin += 30) {
+    const endMin = startMin + 30;
+    if (Number.isInteger(currentMinute) && endMin <= currentMinute) continue;
+    const oldState = stateAt(old, startMin);
+    const newState = stateAt(now, startMin);
+    if (oldState === newState) continue;
+    const last = windows.at(-1);
+    if (last && last.endMin === startMin && last.oldState === oldState && last.newState === newState) {
+      last.endMin = endMin;
+    } else {
+      windows.push({ startMin, endMin, oldState, newState });
+    }
+  }
+  return windows;
+}
+
 function normalizeSegmentsForGemini(state, day = "today") {
   const periods = state?.[day]?.timePeriods;
   if (!Array.isArray(periods)) {
@@ -70,14 +99,16 @@ function hasScheduleChanged(previousState, currentState, day) {
   );
 }
 
-function selectScheduleForGemini(previousState, currentState) {
-  if (hasScheduleChanged(previousState, currentState, "today")) {
+function selectScheduleForGemini(previousState, currentState, preferredDay) {
+  if (preferredDay === "today" || (!preferredDay && hasScheduleChanged(previousState, currentState, "today"))) {
+    const oldSchedule = trimPeriodsForPrompt(previousState?.today?.timePeriods || [], currentState.currentMinute);
+    const newSchedule = trimPeriodsForPrompt(currentState.today.timePeriods, currentState.currentMinute);
     return {
       day: "today",
-      oldSchedule: normalizeSegmentsForGemini(previousState, "today"),
-      newSchedule: normalizeSegmentsForGemini(currentState, "today"),
-      oldOutages: normalizeOutagesForGemini(previousState, "today"),
-      newOutages: normalizeOutagesForGemini(currentState, "today"),
+      oldSchedule,
+      newSchedule,
+      oldOutages: oldSchedule.filter(period => period.state === 2).map(({ startMin, endMin }) => ({ startMin, endMin })),
+      newOutages: newSchedule.filter(period => period.state === 2).map(({ startMin, endMin }) => ({ startMin, endMin })),
       currentMinute: currentState.currentMinute
     };
   }
@@ -96,9 +127,11 @@ function formatCurrentMinute(currentMinute) {
   return Number.isInteger(currentMinute) ? String(currentMinute) : "не переданий";
 }
 
-function buildGeminiPrompt(previousState, currentState) {
-  const selected = selectScheduleForGemini(previousState, currentState);
+function buildGeminiPrompt(previousState, currentState, day) {
+  const selected = selectScheduleForGemini(previousState, currentState, day);
   const treatYellowAsGreen = currentState.treatYellowAsGreen === true;
+  const changes = changedWindowsForPrompt(previousState?.[selected.day]?.timePeriods || [],
+    currentState[selected.day].timePeriods, selected.currentMinute);
 
   return [
     "Ти аналізуєш зміни у графіку відключень електроенергії.",
@@ -147,15 +180,16 @@ function buildGeminiPrompt(previousState, currentState) {
     "- доба поділена на 48 слотів по 30 хвилин",
     "",
     "Твоє завдання:",
-    "1. Порівняти OLD_OUTAGES і NEW_OUTAGES як основне джерело правди про зміни.",
-    "2. Використовувати OLD_SCHEDULE і NEW_SCHEDULE тільки як додатковий контекст.",
-    "3. Знайти всі проміжки часу, де змінився саме період без світла state=2.",
+    "1. Описати лише проміжки з RELEVANT_CHANGES, передані нижче.",
+    "2. OLD_OUTAGES і NEW_OUTAGES містять повні початки та завершення відповідних відключень.",
+    "3. Використовувати OLD_SCHEDULE і NEW_SCHEDULE тільки як додатковий контекст, не шукати в них інших змін.",
     "4. Обʼєднати сусідні 30-хвилинні проміжки, якщо там однакова зміна: відключення додалось або відключення прибралось.",
     "5. Якщо CURRENT_MINUTE переданий — ігнорувати зміни, які повністю закінчилися до CURRENT_MINUTE.",
-    "6. Якщо зміна частково перетинається з CURRENT_MINUTE — показати тільки частину від CURRENT_MINUTE до кінця зміни.",
-    "7. Пояснити зміни українською мовою у зручному для людини форматі.",
-    "8. Не показувати JSON, індекси або технічні деталі.",
-    '9. Якщо релевантних змін немає — відповісти: "Актуальних змін у графіку не знайдено."',
+    "6. Для актуальної зміни збережи повний початок відключення та старий і новий час завершення; не обрізай їх до CURRENT_MINUTE.",
+    "7. Для сьогодні передані лише сегменти від попереднього 30-хвилинного слота; сегмент, що перетинає цю межу, зберігає повний початок.",
+    "8. Пояснити зміни українською мовою у зручному для людини форматі.",
+    "9. Не показувати JSON, індекси або технічні деталі.",
+    '10. Якщо релевантних змін немає — відповісти: "Актуальних змін у графіку не знайдено."',
     "",
     "Формат відповіді:",
     "",
@@ -200,6 +234,9 @@ function buildGeminiPrompt(previousState, currentState) {
     "NEW_OUTAGES:",
     JSON.stringify(selected.newOutages),
     "",
+    "RELEVANT_CHANGES:",
+    JSON.stringify(changes),
+    "",
     "CURRENT_MINUTE:",
     formatCurrentMinute(selected.currentMinute)
   ].join("\n");
@@ -218,7 +255,7 @@ function extractGeminiText(responseBody) {
     .trim();
 }
 
-async function describeLightScheduleChange(config, previousState, currentState, deps) {
+async function describeLightScheduleChange(config, previousState, currentState, deps, day) {
   const response = await deps.requestWithRetry({
     method: "POST",
     url: buildGeminiUrl(config),
@@ -231,7 +268,7 @@ async function describeLightScheduleChange(config, previousState, currentState, 
       contents: [
         {
           role: "user",
-          parts: [{ text: buildGeminiPrompt(previousState, currentState) }]
+          parts: [{ text: buildGeminiPrompt(previousState, currentState, day) }]
         }
       ],
       generationConfig: {
@@ -256,6 +293,8 @@ module.exports = {
   describeLightScheduleChange,
   extractGeminiText,
   normalizePeriodForPrompt,
+  changedWindowsForPrompt,
+  trimPeriodsForPrompt,
   normalizeOutagesForGemini,
   parsePeriodMinutes,
   normalizeSegmentsForGemini

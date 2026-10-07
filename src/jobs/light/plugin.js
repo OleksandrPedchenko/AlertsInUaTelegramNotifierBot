@@ -3,7 +3,7 @@
 const { readFile } = require("fs/promises");
 const { HttpRequestError } = require("../../lib/httpClient");
 const { loadLightConfig } = require("./config");
-const { describeLightScheduleChange } = require("./geminiClient");
+const { changedWindowsForPrompt, describeLightScheduleChange } = require("./geminiClient");
 const { effectiveDay, effectiveSchedule } = require("./effectiveSchedule");
 const { buildDayLightNotification, buildOutageReminderNotification } = require("./messageCatalog");
 const { parseLightSchedule } = require("./parser");
@@ -119,6 +119,17 @@ function getChangedDays(previousState, currentState) {
     dayFingerprint(effectiveDay(previousScheduleForDay(previousState, currentState, day), currentState.treatYellowAsGreen)) !==
     dayFingerprint(effectiveDay(currentState[day], currentState.treatYellowAsGreen))
   );
+}
+
+function getRelevantChangedDays(previousState, currentState) {
+  const changedDays = getChangedDays(previousState, currentState);
+  if (!changedDays.includes("today") || !Number.isInteger(currentState.currentMinute)) return changedDays;
+  const previousDay = effectiveDay(previousScheduleForDay(previousState, currentState, "today"),
+    currentState.treatYellowAsGreen);
+  const currentDay = effectiveDay(currentState.today, currentState.treatYellowAsGreen);
+  const relevant = changedWindowsForPrompt(previousDay?.timePeriods || [],
+    currentDay?.timePeriods || [], currentState.currentMinute).length > 0;
+  return relevant ? changedDays : changedDays.filter(day => day !== "today");
 }
 
 function findPendingOutageReminder({ currentState, previousState, thresholdMinutes }) {
@@ -260,13 +271,13 @@ const lightPlugin = {
   },
 
   shouldNotify({ previousState, config, currentState }) {
-    return !previousState || getChangedDays(previousState, currentState).length > 0 ||
+    return !previousState || getRelevantChangedDays(previousState, currentState).length > 0 ||
       config.job.alwaysSendTgMessage || Boolean(currentState.pendingOutageReminder);
   },
 
   async buildNotification({ previousState, currentState, changed, config, deps }) {
     const visibleState = effectiveSchedule(currentState, currentState.treatYellowAsGreen);
-    const changedDays = getChangedDays(previousState, currentState);
+    const changedDays = getRelevantChangedDays(previousState, currentState);
     const revisedDays = changedDays.filter(day =>
       hasPublishedSchedule(previousScheduleForDay(previousState, currentState, day))
     );
@@ -323,7 +334,8 @@ const lightPlugin = {
           config.gemini,
           effectiveSchedule(priorForPrompt, currentState.treatYellowAsGreen),
           visibleState,
-          deps
+          deps,
+          firstDay
         );
 
         if (summaries[firstDay]) {
@@ -418,7 +430,7 @@ const lightPlugin = {
       const sentDays = deps.sentScheduleDays || new Set();
       sentDays.add(sentDay);
       deps.sentScheduleDays = sentDays;
-      const pendingDays = previousState ? getChangedDays(previousState, currentState) :
+      const pendingDays = previousState ? getRelevantChangedDays(previousState, currentState) :
         ["today", "tomorrow"].filter(day => hasPublishedSchedule(currentState[day]));
       const unsentDays = pendingDays.filter(day => !sentDays.has(day));
       if (unsentDays.length > 0) {
@@ -447,6 +459,7 @@ module.exports = {
   buildCurrentLightState,
   dayFingerprint,
   getChangedDays,
+  getRelevantChangedDays,
   previousScheduleForDay,
   fetchPoeData,
   buildOutageReminderId,
