@@ -7,6 +7,8 @@ const { effectiveDay, effectiveSchedule } = require("./effectiveSchedule");
 const { buildDayLightNotification } = require("./messageCatalog");
 const { renderScheduleImage, renderVerticalScheduleImage } = require("./scheduleImage");
 
+const PIN_FORMAT_VERSION = 2;
+
 function pinKey(stateKey) {
   return `${stateKey}:today-pin`;
 }
@@ -31,6 +33,7 @@ async function rememberInitialTodayPost({ config, stateKey, currentState, previo
     messageId: message.message_id,
     kind,
     fingerprint: fingerprint(currentState),
+    formatVersion: PIN_FORMAT_VERSION,
     pinned: false,
     oldMessageId: existing?.pinned ? existing.messageId : existing?.oldMessageId
   });
@@ -79,7 +82,7 @@ async function postSnapshot({ config, stateKey, currentState, deps, oldPin, noti
   if (!Number.isInteger(sent?.messageId)) throw new Error("Telegram send response has no message_id for today pin");
   const pin = {
     date: currentState.scheduleDate, messageId: sent.messageId, kind: sent.kind,
-    fingerprint: fingerprint(currentState), pinned: false,
+    fingerprint: fingerprint(currentState), formatVersion: PIN_FORMAT_VERSION, pinned: false,
     oldMessageId: oldPin?.pinned ? oldPin.messageId : oldPin?.oldMessageId
   };
   await savePin(config, stateKey, pin);
@@ -111,7 +114,7 @@ async function syncTodayPin({ config, stateKey, currentState, deps, replacementC
     pin.pinned = true;
     await savePin(config, stateKey, pin);
   }
-  if (pin.fingerprint !== desiredFingerprint) {
+  if (pin.fingerprint !== desiredFingerprint || pin.formatVersion !== PIN_FORMAT_VERSION) {
     const notification = await snapshot(currentState, config);
     if (pin.kind === "photo" && telegramCaptionLength(notification.text) > 1024) {
       if (replacementCount >= 1) throw new Error("Cannot fit current schedule in the pinned photo caption");
@@ -145,6 +148,7 @@ async function syncTodayPin({ config, stateKey, currentState, deps, replacementC
       }
     }
     pin.fingerprint = desiredFingerprint;
+    pin.formatVersion = PIN_FORMAT_VERSION;
     await savePin(config, stateKey, pin);
   }
   if (pin.oldMessageId && pin.oldMessageId !== pin.messageId) {

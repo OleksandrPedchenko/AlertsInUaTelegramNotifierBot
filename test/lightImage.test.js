@@ -30,8 +30,8 @@ test("schedule image renders old and new outage periods as a readable PNG", asyn
   assert.equal(width, 1000);
   assert.ok(height < 650, `Revision image should fit a phone preview; got ${height}px`);
   const pixel = async y => [...await sharp(png).extract({ left: 386, top: y, width: 1, height: 1 }).removeAlpha().raw().toBuffer()];
-  assert.deepEqual(await pixel(365), [227, 75, 82]); // 15:45 was red before.
-  assert.deepEqual(await pixel(403), [45, 189, 104]); // 15:45 is green now.
+  assert.deepEqual(await pixel(392), [227, 75, 82]); // 15:45 was red before.
+  assert.deepEqual(await pixel(430), [45, 189, 104]); // 15:45 is green now.
 });
 
 test("schedule image is independent of the time the notification was sent", async () => {
@@ -45,10 +45,23 @@ test("schedule image is independent of the time the notification was sent", asyn
   assert.equal(Buffer.compare(morning, evening), 0);
 });
 
+test("both layouts show daily green and red totals below outage cards", async () => {
+  const current = { timePeriods: [
+    { status: 1, startMin: 0, endMin: 1200 },
+    { status: 2, startMin: 1200, endMin: 1440 }
+  ] };
+  for (const [render, y] of [[renderScheduleImage, 210], [renderVerticalScheduleImage, 212]]) {
+    const png = await render({ queue: 6, subQueue: 1, day: "today", current });
+    const pixel = async x => [...await sharp(png).extract({ left: x, top: y, width: 1, height: 1 }).removeAlpha().raw().toBuffer()];
+    assert.deepEqual(await pixel(245), [45, 189, 104]);
+    assert.deepEqual(await pixel(500), [227, 75, 82]);
+  }
+});
+
 test("timeline bars show visible separators at every half-hour", async () => {
   const current = { timePeriods: [{ status: 1, startMin: 0, endMin: 1440 }] };
   const png = await renderScheduleImage({ queue: 5, subQueue: 1, day: "today", current });
-  const pixel = async x => [...await sharp(png).extract({ left: x, top: 252, width: 1, height: 1 }).removeAlpha().raw().toBuffer()];
+  const pixel = async x => [...await sharp(png).extract({ left: x, top: 279, width: 1, height: 1 }).removeAlpha().raw().toBuffer()];
   assert.notDeepEqual(await pixel(164), await pixel(150));
   assert.notDeepEqual(await pixel(267), await pixel(250));
 });
@@ -69,11 +82,11 @@ test("vertical timelines align half-hour cells and old/new status", async () => 
   assert.equal(width, 1000);
   assert.ok(height > 800 && height < 1100);
   const pixel = async (x, y) => [...await sharp(png).extract({ left: x, top: y, width: 1, height: 1 }).removeAlpha().raw().toBuffer()];
-  assert.deepEqual(await pixel(630, 460), [227, 75, 82]);
-  assert.deepEqual(await pixel(800, 460), [45, 189, 104]);
-  assert.notDeepEqual(await pixel(800, 450), await pixel(800, 460));
-  assert.notDeepEqual(await pixel(133, 294), await pixel(133, 320));
-  assert.notDeepEqual(await pixel(200, 294), await pixel(200, 320));
+  assert.deepEqual(await pixel(630, 490), [227, 75, 82]);
+  assert.deepEqual(await pixel(800, 490), [45, 189, 104]);
+  assert.notDeepEqual(await pixel(800, 480), await pixel(800, 490));
+  assert.notDeepEqual(await pixel(133, 324), await pixel(133, 350));
+  assert.notDeepEqual(await pixel(200, 324), await pixel(200, 350));
 });
 
 test("vertical layout can be selected for live schedule posts", async () => {

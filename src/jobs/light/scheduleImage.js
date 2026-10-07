@@ -1,6 +1,7 @@
 "use strict";
 
 const sharp = require("sharp");
+const { dayTotals, durationClock } = require("./scheduleTotals");
 
 const WIDTH = 1000;
 const BAR_X = 130;
@@ -47,6 +48,19 @@ function drawOutages(day, y) {
       <text x="${x + 428}" y="${top + 31}" text-anchor="end" class="duration">${outageDuration(period.endMin - period.startMin)}</text>`;
   });
   return { svg: cards.join(""), rows: Math.ceil(outages.length / 2) };
+}
+
+function drawTotals(day, y) {
+  const totals = dayTotals(day?.timePeriods);
+  const values = [
+    { x: 245, color: COLORS[1], text: `+${durationClock(totals[1])}` },
+    { x: 500, color: COLORS[2], text: `−${durationClock(totals[2])}` },
+    ...(totals[3] ? [{ x: 755, color: COLORS[3], text: durationClock(totals[3]) }] : [])
+  ];
+  return `<text x="48" y="${y}" class="summary-label">За добу</text>${values.map(value =>
+    `<circle cx="${value.x}" cy="${y - 8}" r="10" fill="${value.color}"/>` +
+    `<text x="${value.x + 22}" y="${y}" class="summary">${value.text}</text>`
+  ).join("")}`;
 }
 
 function drawBar(day, halfStart, y) {
@@ -98,7 +112,9 @@ function drawDay(day, label, date, previous, y, isToday) {
   const chipsY = y + 52;
   const outages = drawOutages(day, chipsY);
   parts.push(outages.svg);
-  const timelineY = chipsY + outages.rows * 60 + 15;
+  const totalsY = chipsY + outages.rows * 60 + 18;
+  parts.push(drawTotals(day, totalsY));
+  const timelineY = totalsY + 24;
   const timeline = drawTimelines(day, previous, timelineY);
   parts.push(timeline.svg);
   return { svg: parts.join(""), nextY: timelineY + timeline.height + 18 };
@@ -120,7 +136,7 @@ async function renderScheduleImage({ queue, subQueue, day, previous, current, sc
     <text x="75" y="${y + 15}" class="legend">Жовтий — можливе світло</text>` : "";
   const height = Math.ceil(y + (hasYellow ? 48 : 20));
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${height}" viewBox="0 0 ${WIDTH} ${height}">
-    <style>text{font-family:DejaVu Sans,Noto Sans,Arial,sans-serif;fill:#F3F7FC}.title{font-size:36px;font-weight:700}.day{font-size:26px;font-weight:700}.outage{font-size:25px;font-weight:700}.duration{font-size:17px;fill:#E6C5C7}.empty{font-size:22px;font-weight:700;fill:#BDEAD0}.half{font-size:18px;font-weight:700}.tick{font-size:16px;fill:#C3CFDE}.row{font-size:17px;font-weight:700}.legend{font-size:17px;fill:#C3CFDE}</style>
+    <style>text{font-family:DejaVu Sans,Noto Sans,Arial,sans-serif;fill:#F3F7FC}.title{font-size:36px;font-weight:700}.day{font-size:26px;font-weight:700}.outage{font-size:25px;font-weight:700}.duration{font-size:17px;fill:#E6C5C7}.empty{font-size:22px;font-weight:700;fill:#BDEAD0}.summary-label{font-size:21px;fill:#C3CFDE}.summary{font-size:25px;font-weight:700}.half{font-size:18px;font-weight:700}.tick{font-size:16px;fill:#C3CFDE}.row{font-size:17px;font-weight:700}.legend{font-size:17px;fill:#C3CFDE}</style>
     <rect width="100%" height="100%" fill="#15202E"/>
     <text x="48" y="60" class="title">Черга ${escapeXml(queue)}.${escapeXml(subQueue)}</text>
     ${content.join("")}${legend}
@@ -175,18 +191,20 @@ function verticalPanel(current, previous, startMinute, x, y) {
 async function renderVerticalScheduleImage({ queue, subQueue, day, previous, current, scheduleDate }) {
   const label = day === "tomorrow" ? "Завтра" : "Сьогодні";
   const outages = drawOutages(current, 140);
-  const timelineY = 140 + outages.rows * 60 + 20;
+  const totalsY = 140 + outages.rows * 60 + 20;
+  const timelineY = totalsY + 30;
   const height = timelineY + 48 + 24 * 26 + 35;
   const hasYellow = [current, previous].some(item =>
     item?.timePeriods?.some(period => (period.status || period.state) === 3)
   );
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${height + (hasYellow ? 30 : 0)}" viewBox="0 0 ${WIDTH} ${height + (hasYellow ? 30 : 0)}">
-    <style>text{font-family:DejaVu Sans,Noto Sans,Arial,sans-serif;fill:#F3F7FC}.title{font-size:36px;font-weight:700}.day{font-size:26px;font-weight:700}.outage{font-size:25px;font-weight:700}.duration{font-size:17px;fill:#E6C5C7}.empty{font-size:22px;font-weight:700;fill:#BDEAD0}.half{font-size:23px;font-weight:700}.row{font-size:20px;font-weight:700}.vertical-tick{font-size:22px;font-weight:700;fill:#DCE6F1}.legend{font-size:17px;fill:#C3CFDE}</style>
+    <style>text{font-family:DejaVu Sans,Noto Sans,Arial,sans-serif;fill:#F3F7FC}.title{font-size:36px;font-weight:700}.day{font-size:26px;font-weight:700}.outage{font-size:25px;font-weight:700}.duration{font-size:17px;fill:#E6C5C7}.empty{font-size:22px;font-weight:700;fill:#BDEAD0}.summary-label{font-size:21px;fill:#C3CFDE}.summary{font-size:25px;font-weight:700}.half{font-size:23px;font-weight:700}.row{font-size:20px;font-weight:700}.vertical-tick{font-size:22px;font-weight:700;fill:#DCE6F1}.legend{font-size:17px;fill:#C3CFDE}</style>
     <rect width="100%" height="100%" fill="#15202E"/>
     <text x="48" y="60" class="title">Черга ${escapeXml(queue)}.${escapeXml(subQueue)}</text>
     <text x="48" y="117" class="day">${label}${shortDate(scheduleDate, day === "tomorrow" ? 1 : 0)}</text>
     <text x="952" y="117" text-anchor="end" class="vertical-tick">Кожна клітинка · 30 хв</text>
     ${outages.svg}
+    ${drawTotals(current, totalsY)}
     ${verticalPanel(current, previous, 0, 48, timelineY)}
     ${verticalPanel(current, previous, 720, 508, timelineY)}
     ${hasYellow ? `<rect x="48" y="${height}" width="17" height="17" fill="${COLORS[3]}"/><text x="75" y="${height + 15}" class="legend">Жовтий — можливе світло</text>` : ""}

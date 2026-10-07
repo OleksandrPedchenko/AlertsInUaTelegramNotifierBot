@@ -7,6 +7,7 @@ const {
   buildLightNotification,
   buildOutageReminderNotification
 } = require("../src/jobs/light/messageCatalog");
+const { effectiveSchedule } = require("../src/jobs/light/effectiveSchedule");
 
 const periods = [
   { time: "00:00 - 17:00", status: 1, statusLabel: "світло є", current: true, durationMinutes: 1020 },
@@ -29,8 +30,18 @@ test("new schedules show colored full periods without source or quote", () => {
     assert.doesNotMatch(message, /Джерело|example\.test|blockquote|Разом:/);
   }
   assert.match(tomorrow, /З’явився графік на завтра/);
+  assert.match(tomorrow, /🟢 \+17:00 · 🔴 −1:00 · 🟡 6:00/);
   assert.doesNotMatch(initial, /Зараз:/);
   assert.doesNotMatch(initial, /← зараз/);
+});
+
+test("daily totals follow the visible yellow treatment", () => {
+  const visible = effectiveSchedule(state, true);
+  const message = buildDayLightNotification(visible, null, "today");
+  assert.match(message, /🟢 \+23:00 · 🔴 −1:00/);
+  assert.doesNotMatch(message, /🟡/);
+  const revised = buildDayLightNotification(visible, day, "today");
+  assert.equal((revised.match(/🟢 \+/g) || []).length, 2);
 });
 
 test("a forced repeat keeps the full schedule in an expandable quote", () => {

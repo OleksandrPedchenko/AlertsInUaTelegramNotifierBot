@@ -32,6 +32,7 @@ test("fan-out fetches POE once and batches changed queues into one Gemini call",
   const env = {
     TG_BOT_TOKEN: "test-token", GEMINI_API_KEY: "test-gemini", LIGHT_PIN_TODAY_SCHEDULE: "false", LIGHT_SCHEDULE_IMAGE_ENABLED: "false",
     LIGHT_SUBSCRIPTIONS_FILE: subscriptionsFile,
+    LIGHT_CURRENT_MINUTE: "0",
     LIGHT_POE_URL: `${base}/customs/dynamicgpv-info.php`,
     LIGHT_STATE_FILE_PATH: path.join(dir, "state.json"),
     LIGHT_LOCK_FILE_PATH: path.join(dir, "light.lock")
@@ -103,6 +104,7 @@ test("tomorrow-only changes get a separate tomorrow message", async () => {
   const env = {
     TG_BOT_TOKEN: "test-token", GEMINI_API_KEY: "test-gemini", LIGHT_SUBSCRIPTIONS_FILE: file, LIGHT_PIN_TODAY_SCHEDULE: "false", LIGHT_SCHEDULE_IMAGE_ENABLED: "false",
     LIGHT_TREAT_YELLOW_AS_GREEN: "false",
+    LIGHT_CURRENT_MINUTE: "0",
     LIGHT_POE_URL: `${base}/customs/dynamicgpv-info.php`,
     LIGHT_STATE_FILE_PATH: path.join(dir, "state.json"),
     LIGHT_LOCK_FILE_PATH: path.join(dir, "light.lock"),
@@ -311,6 +313,7 @@ test("Gemini rate limit uses raw diff and cools down across retry runs", async (
   const base = `http://127.0.0.1:${server.address().port}`;
   const env = {
     TG_BOT_TOKEN: "test-token", GEMINI_API_KEY: "test-gemini", LIGHT_SUBSCRIPTIONS_FILE: file, LIGHT_PIN_TODAY_SCHEDULE: "false", LIGHT_SCHEDULE_IMAGE_ENABLED: "false",
+    LIGHT_CURRENT_MINUTE: "0",
     LIGHT_POE_URL: `${base}/customs/dynamicgpv-info.php`,
     LIGHT_STATE_FILE_PATH: path.join(dir, "state.json"),
     LIGHT_LOCK_FILE_PATH: path.join(dir, "light.lock"),

@@ -1,5 +1,7 @@
 "use strict";
 
+const { dayTotals, durationClock } = require("./scheduleTotals");
+
 function escapeHtml(value) {
   return String(value)
     .replace(/&/g, "&amp;")
@@ -38,8 +40,18 @@ function formatPeriods(title, periods) {
 
   return [
     ...(title ? [`<b>${escapeHtml(title)}</b>`] : []),
-    ...periods.map(formatPeriod)
+    ...periods.map(formatPeriod),
+    formatDayTotals(periods)
   ];
+}
+
+function formatDayTotals(periods) {
+  const totals = dayTotals(periods);
+  return [
+    `🟢 +${durationClock(totals[1])}`,
+    `🔴 −${durationClock(totals[2])}`,
+    ...(totals[3] ? [`🟡 ${durationClock(totals[3])}`] : [])
+  ].join(" · ");
 }
 
 function buildScheduleDetails(state) {
@@ -128,5 +140,6 @@ module.exports = {
   buildDayLightNotification,
   escapeHtml,
   formatOutageReminder,
-  formatPeriod
+  formatPeriod,
+  formatDayTotals
 };

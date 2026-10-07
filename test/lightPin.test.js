@@ -72,6 +72,12 @@ test("today's initial photo is pinned and revisions edit its current snapshot", 
     await runFanout(env, { fetchImpl, logger: createSilentLogger() });
     assert.deepEqual(requests, []);
 
+    const oldFormatPin = (await readJobState(env.LIGHT_STATE_FILE_PATH, pinKey)).state;
+    oldFormatPin.formatVersion = 1;
+    await writeJobState(env.LIGHT_STATE_FILE_PATH, pinKey, oldFormatPin, oldFormatPin.fingerprint);
+    await runFanout(env, { fetchImpl, logger: createSilentLogger() });
+    assert.deepEqual(requests.map(item => item.method), ["editMessageMedia"]);
+
     requests.length = 0;
     env.LIGHT_CURRENT_MINUTE = "1140";
     state.days.today["6.1"][33] = 1;
