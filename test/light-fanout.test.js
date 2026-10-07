@@ -58,7 +58,7 @@ test("fan-out fetches POE once and batches changed queues into one Gemini call",
     await runLightJob(config, { fetchImpl, logger: createSilentLogger() });
     assert.equal(poeGets, 1);
     assert.equal(geminiCalls, 0);
-    assert.deepEqual(messages.map(message => message.chat_id), ["chat-a", "chat-b", "chat-c"]);
+    assert.deepEqual(messages.map(message => message.chat_id), ["chat-a", "chat-a", "chat-b", "chat-b", "chat-c", "chat-c"]);
     messages.length = 0;
 
     state.days.today["5.1"].fill(2, 34, 36);
@@ -291,11 +291,11 @@ test("a failed group retries without resending successful groups", async () => {
   };
   try {
     await assert.rejects(runFanout(env, { fetchImpl, logger: createSilentLogger() }), /retry/);
-    assert.deepEqual(sent, ["good", "retry"]);
+    assert.deepEqual(sent, ["good", "good", "retry"]);
     fail = false;
     sent.length = 0;
     await runFanout(env, { fetchImpl, logger: createSilentLogger() });
-    assert.deepEqual(sent, ["retry"]);
+    assert.deepEqual(sent, ["retry", "retry"]);
   } finally {
     await new Promise(resolve => server.close(resolve));
   }
@@ -379,11 +379,11 @@ test("fan-out sends off and on reminders once for their respective chats", async
   };
   try {
     await runFanout(env, { fetchImpl, logger: createSilentLogger() });
-    assert.equal(messages.length, 4);
-    assert.match(messages[1].text, /🔴 Відключення через/);
-    assert.equal(messages[1].chat_id, "off-chat");
-    assert.match(messages[3].text, /🟢 Світло з’явиться через/);
-    assert.equal(messages[3].chat_id, "on-chat");
+    assert.equal(messages.length, 6);
+    assert.match(messages[2].text, /🔴 Відключення через/);
+    assert.equal(messages[2].chat_id, "off-chat");
+    assert.match(messages[5].text, /🟢 Світло з’явиться через/);
+    assert.equal(messages[5].chat_id, "on-chat");
     messages.length = 0;
     await runFanout(env, { fetchImpl, logger: createSilentLogger() });
     assert.equal(messages.length, 0);

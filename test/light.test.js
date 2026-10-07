@@ -335,7 +335,7 @@ test("default light mode shows yellow as merged green and ignores yellow-to-gree
     fetchImpl: createLightFetch(newHtml, body => messages.push(body.text))
   });
   assert.equal(result.notified, false);
-  assert.equal(messages.length, 1);
+  assert.equal(messages.length, 2);
 });
 
 test("strict light mode preserves yellow and detects its change to green", async () => {
@@ -354,7 +354,7 @@ test("strict light mode preserves yellow and detects its change to green", async
     fetchImpl: createLightFetch(newHtml, body => messages.push(body.text))
   });
   assert.equal(result.notified, true);
-  assert.equal(messages.length, 2);
+  assert.equal(messages.length, 3);
 });
 
 test("changing from strict to green mode does not announce a POE schedule change", async () => {
@@ -372,7 +372,7 @@ test("changing from strict to green mode does not announce a POE schedule change
     fetchImpl: createLightFetch(html, body => messages.push(body.text))
   });
   assert.equal(switched.notified, false);
-  assert.equal(messages.length, 1);
+  assert.equal(messages.length, 2);
 });
 
 test("default light mode sends a confirmed-on reminder at the yellow start", async () => {
@@ -757,5 +757,5 @@ test("light stub mode reads local html and skips POE requests", async () => {
   assert.equal(result.notified, true);
   assert.equal(poeCalls, 0);
   assert.equal(telegramBody.chat_id, "tg-chat");
-  assert.match(telegramBody.text, /Новий графік · черга 2\.2/);
+  assert.match(telegramBody.text, /З’явився графік на завтра · черга 2\.2/);
 });

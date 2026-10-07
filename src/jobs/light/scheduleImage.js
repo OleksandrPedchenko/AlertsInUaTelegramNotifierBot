@@ -2,82 +2,136 @@
 
 const sharp = require("sharp");
 
-const WIDTH = 1200;
+const WIDTH = 1000;
+const BAR_X = 130;
+const BAR_WIDTH = 820;
 const COLORS = { 1: "#2DBD68", 2: "#E34B52", 3: "#E8B934" };
 
 function escapeXml(value) {
-  return String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  return String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 function clock(minute) {
   return `${String(Math.floor(minute / 60)).padStart(2, "0")}:${String(minute % 60).padStart(2, "0")}`;
 }
 
-function bars(day, blockStart, y) {
-  const x = 142;
-  const width = 1000;
-  const blockEnd = blockStart + 360;
-  const parts = [`<rect x="${x}" y="${y}" width="${width}" height="34" rx="8" fill="#293545"/>`];
-  for (const period of day?.timePeriods || []) {
-    const start = Math.max(blockStart, period.startMin);
-    const end = Math.min(blockEnd, period.endMin);
-    if (end <= start) continue;
-    const left = x + (start - blockStart) * width / 360;
-    const barWidth = (end - start) * width / 360;
-    parts.push(`<rect x="${left}" y="${y}" width="${barWidth}" height="34" fill="${COLORS[period.status || period.state] || "#64748B"}"/>`);
-    if ((period.status || period.state) === 2 && barWidth >= 70) {
-      parts.push(`<text x="${left + barWidth / 2}" y="${y + 24}" text-anchor="middle" class="${barWidth < 125 ? "bar-label-small" : "bar-label"}">${clock(start)}–${clock(end)}</text>`);
-    }
-  }
-  parts.push(`<rect x="${x}" y="${y}" width="${width}" height="34" rx="8" fill="none" stroke="#455469" stroke-width="2"/>`);
-  return parts.join("");
+function shortDate(scheduleDate, offset) {
+  if (!scheduleDate) return "";
+  const date = new Date(`${scheduleDate}T00:00:00Z`);
+  if (Number.isNaN(date.getTime())) return "";
+  date.setUTCDate(date.getUTCDate() + offset);
+  return ` · ${String(date.getUTCDate()).padStart(2, "0")}.${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
-async function renderScheduleImage({ queue, subQueue, day, previous, current, currentMinute }) {
+function outageDuration(minutes) {
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return [hours ? `${hours} год` : "", rest ? `${rest} хв` : ""].filter(Boolean).join(" ");
+}
+
+function drawOutages(day, y) {
+  const outages = (day?.timePeriods || []).filter(period => (period.status || period.state) === 2);
+  if (!outages.length) {
+    return {
+      svg: `<rect x="48" y="${y}" width="904" height="50" rx="12" fill="#213D36"/>
+        <text x="68" y="${y + 32}" class="empty">Відключень не заплановано</text>`,
+      rows: 1
+    };
+  }
+  const cards = outages.map((period, index) => {
+    const x = 48 + (index % 2) * 460;
+    const top = y + Math.floor(index / 2) * 60;
+    return `<rect x="${x}" y="${top}" width="444" height="50" rx="12" fill="#303440"/>
+      <rect x="${x}" y="${top}" width="7" height="50" rx="3" fill="${COLORS[2]}"/>
+      <text x="${x + 20}" y="${top + 33}" class="outage">${clock(period.startMin)}–${clock(period.endMin)}</text>
+      <text x="${x + 428}" y="${top + 31}" text-anchor="end" class="duration">${outageDuration(period.endMin - period.startMin)}</text>`;
+  });
+  return { svg: cards.join(""), rows: Math.ceil(outages.length / 2) };
+}
+
+function drawBar(day, halfStart, y) {
+  const shapes = [`<rect x="${BAR_X}" y="${y}" width="${BAR_WIDTH}" height="25" rx="7" fill="#455266"/>`];
+  for (const period of day?.timePeriods || []) {
+    const start = Math.max(halfStart, period.startMin);
+    const end = Math.min(halfStart + 720, period.endMin);
+    if (end <= start) continue;
+    const x = BAR_X + (start - halfStart) * BAR_WIDTH / 720;
+    const width = (end - start) * BAR_WIDTH / 720;
+    shapes.push(`<rect x="${x}" y="${y}" width="${width}" height="25" fill="${COLORS[period.status || period.state] || "#64748B"}"/>`);
+  }
+  shapes.push(`<rect x="${BAR_X}" y="${y}" width="${BAR_WIDTH}" height="25" rx="7" fill="none" stroke="#56677E" stroke-width="2"/>`);
+  return shapes.join("");
+}
+
+function drawTimelines(day, previous, y, currentMinute, isToday) {
   const compared = Boolean(previous?.timePeriods?.length);
-  const both = day === "both";
-  const height = both ? 1330 : compared ? 870 : 705;
-  const title = `${both ? "Сьогодні і завтра" : day === "tomorrow" ? "Завтра" : "Сьогодні"} · черга ${queue}.${subQueue}`;
-  const hasYellow = (both ? [current.today, current.tomorrow] : [current, previous])
-    .some(item => item?.timePeriods?.some(period => (period.status || period.state) === 3));
-  const blocks = [];
-  for (let block = 0; block < (both ? 8 : 4); block += 1) {
-    const tomorrowBlock = both && block >= 4;
-    const localBlock = block % 4;
-    const dayCurrent = both ? (tomorrowBlock ? current.tomorrow : current.today) : current;
-    const localStart = localBlock * 360;
-    const y = 145 + block * (compared ? 170 : 145);
-    if (both && localBlock === 0) blocks.push(`<text x="60" y="${y - 20}" class="day-label">${tomorrowBlock ? "Завтра" : "Сьогодні"}</text>`);
-    blocks.push(`<text x="60" y="${y + 3}" class="hours">${clock(localStart)}–${clock(localStart + 360)}</text>`);
-    for (let hour = 0; hour <= 6; hour += 1) {
-      const tickX = 142 + hour * 1000 / 6;
-      blocks.push(`<text x="${tickX}" y="${y + 25}" text-anchor="middle" class="tick">${clock(localStart + hour * 60)}</text>`);
+  const lines = [];
+  for (let half = 0; half < 2; half += 1) {
+    const halfStart = half * 720;
+    const top = y + half * (compared ? 112 : 86);
+    lines.push(`<text x="48" y="${top + 15}" class="half">${half ? "12–24" : "00–12"}</text>`);
+    for (let tick = 0; tick <= 6; tick += 1) {
+      const x = BAR_X + tick * BAR_WIDTH / 6;
+      lines.push(`<text x="${x}" y="${top + 15}" text-anchor="middle" class="tick">${clock(halfStart + tick * 120)}</text>`);
     }
-    const firstY = y + 43;
+    const firstBarY = top + 26;
     if (compared) {
-      blocks.push(`<text x="60" y="${firstY + 24}" class="row-label">Було</text>`);
-      blocks.push(bars(previous, localStart, firstY));
-      blocks.push(`<text x="60" y="${firstY + 72}" class="row-label">Тепер</text>`);
-      blocks.push(bars(dayCurrent, localStart, firstY + 48));
+      lines.push(`<text x="48" y="${firstBarY + 19}" class="row">Було</text>`);
+      lines.push(drawBar(previous, halfStart, firstBarY));
+      lines.push(`<text x="48" y="${firstBarY + 57}" class="row">Тепер</text>`);
+      lines.push(drawBar(day, halfStart, firstBarY + 38));
     } else {
-      blocks.push(`<text x="60" y="${firstY + 24}" class="row-label">Графік</text>`);
-      blocks.push(bars(dayCurrent, localStart, firstY));
+      lines.push(drawBar(day, halfStart, firstBarY));
     }
-    if ((day === "today" || (both && !tomorrowBlock)) && currentMinute >= localStart && currentMinute < localStart + 360) {
-      const markerX = 142 + (currentMinute - localStart) * 1000 / 360;
-      const bottom = firstY + (compared ? 82 : 34);
-      blocks.push(`<line x1="${markerX}" y1="${firstY - 4}" x2="${markerX}" y2="${bottom + 5}" stroke="#FFFFFF" stroke-width="3" stroke-dasharray="5 4"/>`);
-      blocks.push(`<text x="${Math.max(175, markerX)}" y="${bottom + 26}" text-anchor="middle" class="now">зараз</text>`);
+    if (isToday && Number.isInteger(currentMinute) && currentMinute >= halfStart && currentMinute < halfStart + 720) {
+      const markerX = BAR_X + (currentMinute - halfStart) * BAR_WIDTH / 720;
+      lines.push(`<line x1="${markerX}" y1="${firstBarY - 4}" x2="${markerX}" y2="${firstBarY + (compared ? 67 : 29)}" stroke="#FFFFFF" stroke-width="3" stroke-dasharray="5 4"/>`);
     }
   }
+  return { svg: lines.join(""), height: compared ? 224 : 172 };
+}
+
+function drawDay(day, label, date, previous, currentMinute, y, isToday) {
+  const parts = [`<text x="48" y="${y + 29}" class="day">${label}${shortDate(date, isToday ? 0 : 1)}</text>`];
+  if (isToday && Number.isInteger(currentMinute)) {
+    const active = day?.timePeriods?.find(period => period.startMin <= currentMinute && currentMinute < period.endMin);
+    if (active) {
+      const status = active.status || active.state;
+      const stateText = status === 2 ? "без світла" : status === 3 ? "можливе світло" : "світло є";
+      parts.push(`<rect x="570" y="${y - 1}" width="382" height="42" rx="21" fill="#26374B"/>
+        <circle cx="593" cy="${y + 20}" r="9" fill="${COLORS[status] || "#64748B"}"/>
+        <text x="612" y="${y + 27}" class="status">Зараз ${stateText} · до ${clock(active.endMin)}</text>`);
+    }
+  }
+  const chipsY = y + 52;
+  const outages = drawOutages(day, chipsY);
+  parts.push(outages.svg);
+  const timelineY = chipsY + outages.rows * 60 + 15;
+  const timeline = drawTimelines(day, previous, timelineY, currentMinute, isToday);
+  parts.push(timeline.svg);
+  return { svg: parts.join(""), nextY: timelineY + timeline.height + 18 };
+}
+
+async function renderScheduleImage({ queue, subQueue, day, previous, current, currentMinute, scheduleDate }) {
+  const sections = [{ day: current, label: day === "tomorrow" ? "Завтра" : "Сьогодні", previous, isToday: day !== "tomorrow" }];
+  let y = 88;
+  const content = [];
+  for (const section of sections) {
+    const drawn = drawDay(section.day, section.label, scheduleDate, section.previous, currentMinute, y, section.isToday);
+    content.push(drawn.svg);
+    y = drawn.nextY;
+  }
+  const hasYellow = sections.some(section =>
+    [section.day, section.previous].some(item => item?.timePeriods?.some(period => (period.status || period.state) === 3))
+  );
+  const legend = hasYellow ? `<rect x="48" y="${y}" width="17" height="17" fill="${COLORS[3]}"/>
+    <text x="75" y="${y + 15}" class="legend">Жовтий — можливе світло</text>` : "";
+  const height = Math.ceil(y + (hasYellow ? 48 : 20));
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${height}" viewBox="0 0 ${WIDTH} ${height}">
-    <style>text{font-family:DejaVu Sans,Noto Sans,Arial,sans-serif;fill:#F3F7FC}.title{font-size:38px;font-weight:700}.day-label{font-size:23px;font-weight:700}.hours{font-size:18px;font-weight:700}.tick{font-size:17px;fill:#D4DEEB}.row-label{font-size:19px;font-weight:700}.bar-label{font-size:17px;font-weight:700}.bar-label-small{font-size:12px;font-weight:700}.now{font-size:17px;font-weight:700}</style>
+    <style>text{font-family:DejaVu Sans,Noto Sans,Arial,sans-serif;fill:#F3F7FC}.title{font-size:36px;font-weight:700}.day{font-size:26px;font-weight:700}.outage{font-size:25px;font-weight:700}.duration{font-size:17px;fill:#E6C5C7}.empty{font-size:22px;font-weight:700;fill:#BDEAD0}.status{font-size:18px;font-weight:700}.half{font-size:18px;font-weight:700}.tick{font-size:16px;fill:#C3CFDE}.row{font-size:17px;font-weight:700}.legend{font-size:17px;fill:#C3CFDE}</style>
     <rect width="100%" height="100%" fill="#15202E"/>
-    <text x="60" y="67" class="title">${escapeXml(title)}</text>
-    <rect x="60" y="86" width="18" height="18" fill="${COLORS[1]}"/><text x="86" y="102" class="tick">Світло є</text>
-    <rect x="260" y="86" width="18" height="18" fill="${COLORS[2]}"/><text x="286" y="102" class="tick">Світла немає</text>
-    ${hasYellow ? `<rect x="525" y="86" width="18" height="18" fill="${COLORS[3]}"/><text x="551" y="102" class="tick">Можливе світло</text>` : ""}
-    ${blocks.join("")}
+    <text x="48" y="60" class="title">Черга ${escapeXml(queue)}.${escapeXml(subQueue)}</text>
+    ${content.join("")}${legend}
   </svg>`;
   return sharp(Buffer.from(svg)).png().toBuffer();
 }

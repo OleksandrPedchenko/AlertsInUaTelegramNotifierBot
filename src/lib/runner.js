@@ -5,7 +5,7 @@ const { requestWithRetry } = require("./httpClient");
 const { acquireRunLock } = require("./lock");
 const { createLogger } = require("./logger");
 const { readJobState, writeJobState } = require("./stateStore");
-const { sendTelegramMessage, sendTelegramPhoto } = require("./telegramNotifier");
+const { sendTelegramNotification } = require("./telegramNotifier");
 
 function createFallbackLogger() {
   return {
@@ -188,14 +188,12 @@ async function runPluginJob(plugin, env = process.env, options = {}) {
       };
     }
 
+    let deliveredMessages = 0;
     for (const notification of notifications) {
-      await (notification.photo ? sendTelegramPhoto(notification.photo, notification.text, config.telegram, {
+      deliveredMessages += await sendTelegramNotification(notification, config.telegram, {
         fetchImpl: options.fetchImpl,
         logger
-      }) : sendTelegramMessage(notification.text, config.telegram, {
-        fetchImpl: options.fetchImpl,
-        logger
-      }));
+      });
       const updatedState = typeof plugin.afterNotificationSuccess === "function"
         ? await plugin.afterNotificationSuccess({
             previousState,
@@ -217,7 +215,7 @@ async function runPluginJob(plugin, env = process.env, options = {}) {
 
     logger.info("Notification step completed", {
       jobName: plugin.name,
-      notificationCount: notifications.length,
+      notificationCount: deliveredMessages,
       stateKey,
       stateFilePath
     });

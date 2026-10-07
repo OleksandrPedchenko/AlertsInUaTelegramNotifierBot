@@ -88,7 +88,7 @@ test("light worker fetches only the local mock schedule and sends a schedule mes
     });
     assert.equal(result.notified, true);
     assert.equal(message.chat_id, "test-chat");
-    assert.match(message.text, /Новий графік · черга 5\.1/);
+    assert.match(message.text, /З’явився графік на завтра · черга 5\.1/);
     assert.deepEqual(poeRequests, [[`${base}/customs/dynamicgpv-info.php`, "GET"]]);
   } finally {
     await new Promise((resolve) => server.close(resolve));

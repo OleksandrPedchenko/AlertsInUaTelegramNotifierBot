@@ -95,6 +95,19 @@ async function sendTelegramMessage(text, config, options = {}) {
   }
 }
 
+async function sendTelegramNotification(notification, config, options = {}) {
+  const captionLength = notification.text
+    .replace(/<[^>]*>/g, "")
+    .replace(/&(?:amp|lt|gt|quot|apos);/g, " ").length;
+  if (notification.photo && captionLength <= 1024) {
+    await sendTelegramPhoto(notification.photo, notification.text, config, options);
+  } else {
+    if (notification.photo) options.logger?.warn?.("Schedule caption exceeds Telegram limit; sending full text", { captionLength });
+    await sendTelegramMessage(notification.text, config, options);
+  }
+  return 1;
+}
+
 class TelegramNotifier {
   constructor(config, options = {}) {
     this.config = config;
@@ -110,5 +123,6 @@ module.exports = {
   NotificationError,
   TelegramNotifier,
   sendTelegramMessage,
-  sendTelegramPhoto
+  sendTelegramPhoto,
+  sendTelegramNotification
 };

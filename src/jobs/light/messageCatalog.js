@@ -94,7 +94,7 @@ function buildDayLightNotification(currentState, previousDay, day, options = {})
   const dayLabel = day === "tomorrow" ? "Завтра" : "Сьогодні";
   const currentDay = currentState[day];
   const lines = [
-    `<b>${previousDay ? "🔄 Змінився графік" : "📅 З’явився графік"} на ${dayLabel.toLowerCase()} · черга ${escapeHtml(currentState.queue)}.${escapeHtml(currentState.subQueue)}</b>`
+    `<b>${previousDay ? "🔄 Змінився графік" : options.currentSchedule ? "⚡ Актуальний графік" : "📅 З’явився графік"} на ${dayLabel.toLowerCase()} · черга ${escapeHtml(currentState.queue)}.${escapeHtml(currentState.subQueue)}</b>`
   ];
   if (options.changeSummary) {
     lines.push("", escapeHtml(options.changeSummary));

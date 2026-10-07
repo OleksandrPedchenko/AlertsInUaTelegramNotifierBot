@@ -5,7 +5,7 @@ const { HttpRequestError } = require("../../lib/httpClient");
 const { loadLightConfig } = require("./config");
 const { describeLightScheduleChange } = require("./geminiClient");
 const { effectiveDay, effectiveSchedule } = require("./effectiveSchedule");
-const { buildDayLightNotification, buildLightNotification, buildOutageReminderNotification, escapeHtml } = require("./messageCatalog");
+const { buildDayLightNotification, buildOutageReminderNotification } = require("./messageCatalog");
 const { parseLightSchedule } = require("./parser");
 const { renderScheduleImage } = require("./scheduleImage");
 
@@ -353,12 +353,14 @@ const lightPlugin = {
     }
 
     if (!previousState || (changedDays.length === 0 && config.job.alwaysSendTgMessage)) {
-      notifications.push({
-        type: "schedule-change",
-        text: buildLightNotification(visibleState, null, {
-          collapseSchedule: Boolean(previousState)
-        })
-      });
+      for (const day of ["today", "tomorrow"].filter(day => hasPublishedSchedule(currentState[day]))) {
+        notifications.push({
+          type: `schedule-change:${day}`,
+          text: buildDayLightNotification(visibleState, null, day, {
+            currentSchedule: Boolean(previousState)
+          })
+        });
+      }
     } else {
       for (const day of changedDays) {
         const previousDay = previousScheduleForDay(previousState, currentState, day);
@@ -385,16 +387,16 @@ const lightPlugin = {
     if (config.job.scheduleImageEnabled) {
       for (const notification of notifications) {
         if (!notification.type.startsWith("schedule-change")) continue;
-        const day = notification.type.split(":")[1] ||
-          (visibleState.tomorrow.timePeriods.length ? "both" : "today");
-        const prior = day === "both" ? null : previousScheduleForDay(previousState, currentState, day);
+        const day = notification.type.split(":")[1];
+        const prior = changedDays.includes(day) ? previousScheduleForDay(previousState, currentState, day) : null;
         const previous = prior?.timePeriods?.length
           ? effectiveDay(prior, currentState.treatYellowAsGreen) : null;
-        const current = day === "both" ? visibleState : visibleState[day];
+        const current = visibleState[day];
         try {
           notification.photo = await renderScheduleImage({
             queue: currentState.queue, subQueue: currentState.subQueue,
-            day, previous, current, currentMinute: currentState.currentMinute
+            day, previous, current, currentMinute: currentState.currentMinute,
+            scheduleDate: currentState.scheduleDate
           });
         } catch (error) {
           deps.logger.warn("Schedule image rendering failed; sending text schedule", {
@@ -402,10 +404,6 @@ const lightPlugin = {
           });
           continue;
         }
-        const title = notification.text.split("\n")[0];
-        const summary = day === "both" ? "" : Array.from(summaries[day] || "").slice(0, 700).join("");
-        notification.text = [title, summary ? `\n${escapeHtml(summary)}` : "",
-          currentState.updatedAt ? `\n🕒 ${escapeHtml(currentState.updatedAt)}` : ""].join("");
       }
     }
 
@@ -414,11 +412,13 @@ const lightPlugin = {
 
   async afterNotificationSuccess({ previousState, currentState, notifications, deps }) {
     const sentDay = notifications[0]?.type?.split(":")[1];
-    if (sentDay && previousState) {
+    if (sentDay) {
       const sentDays = deps.sentScheduleDays || new Set();
       sentDays.add(sentDay);
       deps.sentScheduleDays = sentDays;
-      const unsentDays = getChangedDays(previousState, currentState).filter(day => !sentDays.has(day));
+      const pendingDays = previousState ? getChangedDays(previousState, currentState) :
+        ["today", "tomorrow"].filter(day => hasPublishedSchedule(currentState[day]));
+      const unsentDays = pendingDays.filter(day => !sentDays.has(day));
       if (unsentDays.length > 0) {
         const saved = { ...currentState };
         for (const day of unsentDays) {

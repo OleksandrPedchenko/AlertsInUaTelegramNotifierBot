@@ -8,7 +8,7 @@ const { acquireRunLock } = require("../../lib/lock");
 const { createLogger } = require("../../lib/logger");
 const { normalizeNotifications } = require("../../lib/runner");
 const { readJobState, writeJobState } = require("../../lib/stateStore");
-const { sendTelegramMessage, sendTelegramPhoto } = require("../../lib/telegramNotifier");
+const { sendTelegramNotification } = require("../../lib/telegramNotifier");
 const { loadLightConfig } = require("./config");
 const { buildGeminiUrl, extractGeminiText, normalizePeriodForPrompt } = require("./geminiClient");
 const { effectiveDay } = require("./effectiveSchedule");
@@ -291,13 +291,9 @@ async function runFanout(env = process.env, options = {}) {
           const chatId = item.config.telegram.chatId;
           const waitMs = 1100 - (Date.now() - (lastSentAt.get(chatId) || 0));
           if (waitMs > 0) await new Promise(resolve => setTimeout(resolve, waitMs));
-          if (notification.photo) {
-            await sendTelegramPhoto(notification.photo, notification.text, item.config.telegram, deps);
-          } else {
-            await sendTelegramMessage(notification.text, item.config.telegram, deps);
-          }
+          const delivered = await sendTelegramNotification(notification, item.config.telegram, deps);
           lastSentAt.set(chatId, Date.now());
-          notificationCount += 1;
+          notificationCount += delivered;
           logger.info("Light notification delivered", {
             jobName: "light", queue: item.queueKey, chatId, type: notification.type
           });

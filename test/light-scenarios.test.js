@@ -38,7 +38,7 @@ async function execute(caseName, time, overrides = {}) {
 
 test("live scenarios default to green treatment of yellow when enabled", async () => {
   const initial = await execute("initial", "12:00", { LIGHT_TREAT_YELLOW_AS_GREEN: "true" });
-  assert.equal(initial.messages.length, 1);
+  assert.equal(initial.messages.length, 2);
   assert.doesNotMatch(initial.messages[0].text, /🟡/);
   assert.match(initial.messages[0].text, /🟢 16:00–21:00 · світло є/);
   const reminder = await execute("tentative-on", "15:50", { LIGHT_TREAT_YELLOW_AS_GREEN: "true" });
@@ -82,7 +82,7 @@ test("scenario fixture keeps fixed six-hour outage starts and a half-hour return
 });
 
 for (const [caseName, time, expected, geminiCalls] of [
-  ["initial", "12:00", /⚡ Новий графік/, 0],
+  ["initial", "12:00", /З’явився графік на сьогодні/, 0],
   ["schedule-change", "12:00", /Змінився графік відключень/, 1],
   ["today-shorter", "12:00", /Змінився графік відключень/, 1],
   ["tomorrow-appears", "12:00", /З’явився графік на завтра/, 0],
@@ -96,13 +96,14 @@ for (const [caseName, time, expected, geminiCalls] of [
   test(`live scenario ${caseName} uses mock POE and sends expected Telegram message`, async () => {
     const actual = await execute(caseName, time);
     assert.equal(actual.result.notified, true);
-    assert.equal(actual.messages.length, 1);
+    assert.equal(actual.messages.length, caseName === "initial" ? 2 : 1);
     assert.equal(actual.messages[0].chat_id, "demo-chat");
     assert.match(actual.messages[0].text, expected);
     if (caseName === "initial") {
       assert.ok((actual.messages[0].text.match(/🔴/g) || []).length >= 2);
       assert.match(actual.messages[0].text, /🟡/);
-      assert.match(actual.messages[0].text, /Завтра/);
+      assert.doesNotMatch(actual.messages[0].text, /Завтра/);
+      assert.match(actual.messages[1].text, /З’явився графік на завтра/);
     }
     if (caseName === "tomorrow-appears") {
       assert.doesNotMatch(actual.messages[0].text, /Було|Стало|Що змінилось/);

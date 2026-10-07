@@ -14,7 +14,7 @@ const { lightPlugin } = require("./plugin");
 const scenarioSchedule = require("./scenarioSchedule.json");
 
 const CASES = Object.freeze({
-  initial: { time: "12:00", description: "First schedule notification", seed: false },
+  initial: { time: "12:00", description: "First today and tomorrow schedules as separate notifications", seed: false },
   "schedule-change": { time: "12:00", description: "Today's outage extends by 30 minutes, with a real Gemini summary", gemini: true },
   "today-shorter": { time: "12:00", description: "Today's outage ends 30 minutes earlier without moving its start", gemini: true },
   "tomorrow-appears": { time: "12:00", description: "Tomorrow schedule first published without a comparison" },
