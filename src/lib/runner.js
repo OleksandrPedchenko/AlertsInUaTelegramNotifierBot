@@ -5,7 +5,7 @@ const { requestWithRetry } = require("./httpClient");
 const { acquireRunLock } = require("./lock");
 const { createLogger } = require("./logger");
 const { readJobState, writeJobState } = require("./stateStore");
-const { sendTelegramMessage } = require("./telegramNotifier");
+const { sendTelegramNotification } = require("./telegramNotifier");
 
 function createFallbackLogger() {
   return {
@@ -61,7 +61,8 @@ function normalizeNotifications(notificationOutput) {
       if (typeof notification === "object" && typeof notification.text === "string") {
         return {
           type: notification.type || "default",
-          text: notification.text
+          text: notification.text,
+          photo: notification.photo
         };
       }
 
@@ -129,10 +130,6 @@ async function runPluginJob(plugin, env = process.env, options = {}) {
     const currentFingerprint = plugin.getStateFingerprint(currentState);
     const changed = previousFingerprint !== currentFingerprint;
 
-    await writeJobState(stateFilePath, stateKey, currentState, currentFingerprint, {
-      jobName: plugin.name
-    });
-
     const shouldNotify =
       typeof plugin.shouldNotify === "function"
         ? plugin.shouldNotify({
@@ -147,6 +144,10 @@ async function runPluginJob(plugin, env = process.env, options = {}) {
         : changed;
 
     if (!shouldNotify) {
+      await writeJobState(stateFilePath, stateKey, currentState, currentFingerprint, {
+        jobName: plugin.name
+      });
+      await plugin.syncTodayPin?.({ config, stateKey, currentState, deps });
       logger.info("State unchanged; notification skipped", {
         jobName: plugin.name,
         stateKey,
@@ -173,6 +174,10 @@ async function runPluginJob(plugin, env = process.env, options = {}) {
     const notifications = normalizeNotifications(notificationOutput);
 
     if (notifications.length === 0) {
+      await writeJobState(stateFilePath, stateKey, currentState, currentFingerprint, {
+        jobName: plugin.name
+      });
+      await plugin.syncTodayPin?.({ config, stateKey, currentState, deps });
       logger.info("Notification text is empty; notification skipped", {
         jobName: plugin.name,
         stateKey
@@ -185,42 +190,37 @@ async function runPluginJob(plugin, env = process.env, options = {}) {
       };
     }
 
+    let deliveredMessages = 0;
     for (const notification of notifications) {
-      await sendTelegramMessage(notification.text, config.telegram, {
+      deliveredMessages += await sendTelegramNotification(notification, config.telegram, {
         fetchImpl: options.fetchImpl,
-        logger
+        logger,
+        onSent: (message, kind) => plugin.afterTelegramSend?.({
+          config, stateKey, previousState, currentState, notification, message, kind, deps
+        })
       });
-    }
-
-    if (typeof plugin.afterNotificationSuccess === "function") {
-      const updatedState = await plugin.afterNotificationSuccess({
-        previousState,
-        previousRecord,
-        currentState,
-        currentFingerprint,
-        previousFingerprint,
-        changed,
-        config,
-        deps,
-        notifications
+      const updatedState = typeof plugin.afterNotificationSuccess === "function"
+        ? await plugin.afterNotificationSuccess({
+            previousState,
+            previousRecord,
+            currentState,
+            currentFingerprint,
+            previousFingerprint,
+            changed,
+            config,
+            deps,
+            notifications: [notification]
+          })
+        : null;
+      const stateToSave = updatedState || currentState;
+      await writeJobState(stateFilePath, stateKey, stateToSave, plugin.getStateFingerprint(stateToSave), {
+        jobName: plugin.name
       });
-
-      if (updatedState) {
-        await writeJobState(
-          stateFilePath,
-          stateKey,
-          updatedState,
-          plugin.getStateFingerprint(updatedState),
-          {
-            jobName: plugin.name
-          }
-        );
-      }
+      await plugin.syncTodayPin?.({ config, stateKey, currentState, deps });
     }
-
     logger.info("Notification step completed", {
       jobName: plugin.name,
-      notificationCount: notifications.length,
+      notificationCount: deliveredMessages,
       stateKey,
       stateFilePath
     });

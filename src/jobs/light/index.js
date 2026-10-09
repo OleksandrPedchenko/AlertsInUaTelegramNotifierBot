@@ -6,14 +6,20 @@ const { HttpRequestError } = require("../../lib/httpClient");
 const { createLoggerFromEnv } = require("../../lib/logger");
 const { NotificationError } = require("../../lib/telegramNotifier");
 const { runPluginJob } = require("../../lib/runner");
+const { createEnvReader } = require("../../lib/config");
+const { runFanout } = require("./fanout");
 const { lightPlugin } = require("./plugin");
 
 dotenv.config({ quiet: true });
 
 async function runLightJob(config, options = {}) {
+  const selectedConfig = config || options.config || lightPlugin.loadConfig(process.env, createEnvReader(process.env));
+  if (selectedConfig.job.subscriptionsFilePath) {
+    return runFanout(process.env, { ...options, config: selectedConfig });
+  }
   return runPluginJob(lightPlugin, process.env, {
     ...options,
-    config
+    config: selectedConfig
   });
 }
 
@@ -21,7 +27,7 @@ async function main(options = {}) {
   const logger = options.logger || createLoggerFromEnv(process.env);
 
   try {
-    await runPluginJob(lightPlugin, process.env, {
+    await runLightJob(undefined, {
       ...options,
       logger
     });

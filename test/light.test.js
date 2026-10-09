@@ -7,11 +7,13 @@ const test = require("node:test");
 
 const { createEnvReader } = require("../src/lib/config");
 const { runPluginJob } = require("../src/lib/runner");
-const { writeJobState } = require("../src/lib/stateStore");
+const { readJobState, writeJobState } = require("../src/lib/stateStore");
 const { loadLightConfig } = require("../src/jobs/light/config");
+const { effectiveSchedule } = require("../src/jobs/light/effectiveSchedule");
+const { buildGeminiPrompt, changedWindowsForPrompt, trimPeriodsForPrompt } = require("../src/jobs/light/geminiClient");
 const { createDefaultState, createMockServer, renderPoeHtml } = require("../src/jobs/light/mockServer");
 const { parseLightSchedule } = require("../src/jobs/light/parser");
-const { encodePostBody, lightPlugin } = require("../src/jobs/light/plugin");
+const { findPendingOutageReminder, getChangedDays, getRelevantChangedDays, lightPlugin, previousScheduleForDay } = require("../src/jobs/light/plugin");
 const { createMemoryLogger, createSilentLogger, createTempDir, createTextResponse } = require("./helpers");
 
 function row(statuses) {
@@ -50,6 +52,7 @@ function buildLightConfig(dir, overrides = {}) {
   const env = {
     TG_BOT_TOKEN: "tg-token",
     TG_CHAT_ID: "tg-chat",
+    LIGHT_PIN_TODAY_SCHEDULE: "false", LIGHT_SCHEDULE_IMAGE_ENABLED: "false",
     LIGHT_QUEUE: "2",
     LIGHT_SUB_QUEUE: "2",
     LIGHT_LOCK_FILE_PATH: path.join(dir, "light.lock"),
@@ -72,10 +75,6 @@ function createLightFetch(html, onTelegram) {
       return createTextResponse(200, JSON.stringify({ ok: true }));
     }
 
-    if (options.method === "POST") {
-      return createTextResponse(200, "post ok");
-    }
-
     return createTextResponse(200, html);
   };
 }
@@ -96,8 +95,23 @@ test("light config reads LIGHT keys and falls back to xbar VAR keys", async () =
   assert.equal(config.poe.subQueue, 2);
   assert.equal(config.telegram.chatId, "tg-chat");
   assert.equal(config.job.useStub, false);
+  assert.equal(config.job.treatYellowAsGreen, true);
   assert.equal(config.job.stubFilePath, path.resolve(dir, "light-example.html"));
   assert.equal(config.gemini.enabled, false);
+});
+
+test("light config can keep yellow periods tentative", async () => {
+  const dir = await createTempDir();
+  const config = buildLightConfig(dir, { LIGHT_TREAT_YELLOW_AS_GREEN: "false" });
+  assert.equal(config.job.treatYellowAsGreen, false);
+});
+
+test("light image layout defaults to horizontal and accepts vertical", async () => {
+  const dir = await createTempDir();
+  assert.equal(buildLightConfig(dir).job.scheduleImageLayout, "horizontal");
+  assert.equal(buildLightConfig(dir, { LIGHT_SCHEDULE_IMAGE_LAYOUT: "vertical" }).job.scheduleImageLayout, "vertical");
+  assert.throws(() => buildLightConfig(dir, { LIGHT_SCHEDULE_IMAGE_LAYOUT: "diagonal" }),
+    /LIGHT_SCHEDULE_IMAGE_LAYOUT must be horizontal or vertical/);
 });
 
 test("light config defaults Gemini to flash lite latest model", async () => {
@@ -110,15 +124,46 @@ test("light config defaults Gemini to flash lite latest model", async () => {
   assert.equal(config.gemini.model, "models/gemini-flash-lite-latest");
 });
 
+test("single-queue Gemini prompt follows green treatment of yellow", () => {
+  const previous = effectiveSchedule(parseLightSchedule(createPoeHtml([2, 2, 3, 1]), 2, 2), true);
+  const current = effectiveSchedule({
+    ...parseLightSchedule(createPoeHtml([2, 3, 1, 1]), 2, 2),
+    currentMinute: 0,
+    treatYellowAsGreen: true
+  }, true);
+  const prompt = buildGeminiPrompt(previous, current);
+  assert.match(prompt, /Жовтий період POE.*світлом/);
+  assert.match(prompt, /🟢.*Відключення скорочено/);
+  assert.doesNotMatch(prompt, /"state":3/);
+});
+
+test("Gemini context keeps one prior cell and the full outage crossing it", () => {
+  const old = [
+    { state: 2, startMin: 0, endMin: 30 },
+    { state: 1, startMin: 30, endMin: 900 },
+    { state: 2, startMin: 900, endMin: 960 },
+    { state: 1, startMin: 960, endMin: 1440 }
+  ];
+  const now = [
+    { state: 1, startMin: 0, endMin: 900 },
+    { state: 2, startMin: 900, endMin: 990 },
+    { state: 1, startMin: 990, endMin: 1440 }
+  ];
+  assert.deepEqual(trimPeriodsForPrompt(old, 970)[0], { state: 2, startMin: 900, endMin: 960 });
+  assert.deepEqual(changedWindowsForPrompt(old, now, 970), [
+    { startMin: 960, endMin: 990, oldState: 1, newState: 2 }
+  ]);
+  assert.deepEqual(changedWindowsForPrompt(old, now, 990), []);
+  assert.equal(trimPeriodsForPrompt(old, null).length, 4);
+});
+
 test("light config allows localhost http mock URLs only", async () => {
   const dir = await createTempDir();
   const config = buildLightConfig(dir, {
-    LIGHT_POE_URL: "http://127.0.0.1:3010/customs/dynamicgpv-info.php",
-    LIGHT_POE_POST_URL: "http://localhost:3010/customs/search-disconnection.php"
+    LIGHT_POE_URL: "http://127.0.0.1:3010/customs/dynamicgpv-info.php"
   });
 
   assert.equal(config.poe.url, "http://127.0.0.1:3010/customs/dynamicgpv-info.php");
-  assert.equal(config.poe.postUrl, "http://localhost:3010/customs/search-disconnection.php");
 
   assert.throws(
     () =>
@@ -225,11 +270,107 @@ test("light parser preserves xbar row offset and segment grouping", () => {
   assert.equal(schedule.today.totalTimeOff, 30);
 });
 
-test("light post body keeps xbar disconn encoding", () => {
-  assert.equal(
-    encodePostBody({ city_name: "с.Зайченці" }),
-    `disconn=${encodeURIComponent(JSON.stringify({ city_name: "с.Зайченці" }))}`
+test("light parser rejects HTML without the selected schedule row", () => {
+  assert.throws(
+    () => parseLightSchedule("<html><body>Service unavailable</body></html>", 2, 2),
+    /schedule/i
   );
+});
+
+test("light parser treats an explicit table-free POE no-schedule response as all-day light", () => {
+  const html = `<div class="gpvinfodetail"><p>На сьогодні <span>ГПВ не заплановано</span>.</p>
+    <div>Оновлено 09.10.2026</div></div>`;
+  const schedule = parseLightSchedule(html, 1, 1);
+  assert.deepEqual(schedule.today.timePeriods.map(({ status, startMin, endMin }) =>
+    ({ status, startMin, endMin })), [{ status: 1, startMin: 0, endMin: 1440 }]);
+  assert.equal(schedule.today.totalTimeOn, 1440);
+  assert.equal(schedule.today.totalTimeOff, 0);
+  assert.equal(schedule.noScheduleToday, true);
+  assert.deepEqual(schedule.tomorrow.timePeriods, []);
+  assert.equal(schedule.updatedAt, "Оновлено 09.10.2026");
+});
+
+test("light parser does not hide a malformed schedule table behind a no-schedule notice", () => {
+  const html = `<div class="gpvinfodetail"><p>ГПВ не заплановано</p>
+    <table><tbody><tr><td>invalid row</td></tr></tbody></table></div>`;
+  assert.throws(() => parseLightSchedule(html, 1, 1), /missing or invalid/);
+});
+
+test("light reminders include turn-on transitions and reset on a new day", () => {
+  const periods = [
+    { state: 1, startMin: 0, endMin: 60, time: "00:00 - 01:00" },
+    { state: 2, startMin: 60, endMin: 90, time: "01:00 - 01:30" },
+    { state: 1, startMin: 90, endMin: 120, time: "01:30 - 02:00" }
+  ];
+  const state = { today: { timePeriods: periods }, currentMinute: 85, scheduleDate: "2026-10-07" };
+  const previousState = { outageReminders: { sentIds: ["2026-10-06:off:60-90"] } };
+  const reminder = findPendingOutageReminder({ currentState: state, previousState, thresholdMinutes: 10 });
+  assert.equal(reminder.kind, "on");
+  assert.equal(reminder.minutesUntilStart, 5);
+  assert.equal(reminder.id, "2026-10-07:on:90-120");
+  assert.match(findPendingOutageReminder({ currentState: { ...state, currentMinute: 55 }, previousState, thresholdMinutes: 10 }).id, /^2026-10-07:off:/);
+});
+
+test("light reminders include tomorrow's midnight transition", () => {
+  const currentState = {
+    scheduleDate: "2026-10-06", currentMinute: 1435,
+    today: { timePeriods: [{ state: 2, startMin: 1410, endMin: 1440, time: "23:30 - 24:00" }] },
+    tomorrow: { timePeriods: [{ state: 1, startMin: 0, endMin: 60, time: "00:00 - 01:00" }] }
+  };
+  const reminder = findPendingOutageReminder({ currentState, previousState: null, thresholdMinutes: 10 });
+  assert.equal(reminder.kind, "on");
+  assert.equal(reminder.day, "tomorrow");
+  assert.equal(reminder.minutesUntilStart, 5);
+  assert.equal(reminder.id, "2026-10-07:on:0-60");
+});
+
+test("day comparison follows calendar dates across midnight", () => {
+  const allOn = { timePeriods: [{ status: 1, time: "00:00 - 24:00", durationMinutes: 1440 }] };
+  const off = { timePeriods: [{ status: 2, time: "00:00 - 24:00", durationMinutes: 1440 }] };
+  const previous = { scheduleDate: "2026-10-06", today: off, tomorrow: allOn };
+  const current = { scheduleDate: "2026-10-07", today: allOn, tomorrow: off };
+  assert.deepEqual(getChangedDays(previous, current), ["tomorrow"]);
+  assert.equal(previousScheduleForDay(previous, current, "tomorrow"), null);
+});
+
+test("today ignores past-only cells but keeps the current cell and all of tomorrow", () => {
+  const day = cells => ({ timePeriods: cells.map((status, index) => ({
+    status, startMin: index * 30, endMin: (index + 1) * 30,
+    time: `${String(Math.floor(index / 2)).padStart(2, "0")}:${index % 2 ? "30" : "00"} - ${String(Math.floor((index + 1) / 2)).padStart(2, "0")}:${(index + 1) % 2 ? "30" : "00"}`,
+    durationMinutes: 30
+  })) });
+  const previous = { scheduleDate: "2026-10-07", today: day([2, 1, 1, 1]), tomorrow: day([1, 1, 1, 1]) };
+  const current = { scheduleDate: "2026-10-07", currentMinute: 75, treatYellowAsGreen: true,
+    today: day([1, 1, 1, 1]), tomorrow: day([1, 2, 1, 1]) };
+  assert.deepEqual(getRelevantChangedDays(previous, current), ["tomorrow"]);
+  current.today = day([1, 1, 2, 1]);
+  assert.deepEqual(getRelevantChangedDays(previous, current), ["today", "tomorrow"]);
+  current.currentMinute = 90;
+  assert.deepEqual(getRelevantChangedDays(previous, current), ["tomorrow"]);
+});
+
+test("single-queue runner saves a past-only revision without Telegram or Gemini", async () => {
+  const dir = await createTempDir();
+  const oldHtml = createPoeHtml([2, 1, 1, 1]);
+  const newHtml = createPoeHtml([1, 1, 1, 1]);
+  const config = buildLightConfig(dir, { LIGHT_CURRENT_MINUTE: "100", GEMINI_API_KEY: "test-key" });
+  const previous = parseLightSchedule(oldHtml, 2, 2);
+  await writeJobState(config.job.stateFilePath, lightPlugin.getStateKey(config), previous,
+    lightPlugin.getStateFingerprint(previous));
+  let telegram = 0;
+  let gemini = 0;
+  const result = await runPluginJob(lightPlugin, {}, { config, logger: createSilentLogger(),
+    fetchImpl: async (url) => {
+      if (String(url).includes("api.telegram.org")) telegram++;
+      if (String(url).includes("generativelanguage.googleapis.com")) gemini++;
+      return createTextResponse(200, newHtml);
+    }
+  });
+  assert.equal(result.notified, false);
+  assert.equal(telegram, 0);
+  assert.equal(gemini, 0);
+  const saved = await readJobState(config.job.stateFilePath, lightPlugin.getStateKey(config));
+  assert.equal(saved.state.today.timePeriods[0].status, 1);
 });
 
 test("light runner skips notification when selected queue fingerprint is unchanged", async () => {
@@ -238,9 +379,9 @@ test("light runner skips notification when selected queue fingerprint is unchang
   const config = buildLightConfig(dir);
   const previousState = {
     ...parseLightSchedule(html, config.poe.queue, config.poe.subQueue),
+    treatYellowAsGreen: true,
     sourceUrl: config.poe.url,
     responseStatus: 200,
-    postResponseStatus: 200
   };
 
   await writeJobState(
@@ -264,6 +405,85 @@ test("light runner skips notification when selected queue fingerprint is unchang
   assert.equal(telegramCalls, 0);
 });
 
+test("default light mode shows yellow as merged green and ignores yellow-to-green-only changes", async () => {
+  const dir = await createTempDir();
+  const oldHtml = createPoeHtml([2, 3, 1, 1]);
+  const newHtml = createPoeHtml([2, 1, 1, 1]);
+  const config = buildLightConfig(dir);
+  const messages = [];
+  await runPluginJob(lightPlugin, {}, {
+    config, logger: createSilentLogger(),
+    fetchImpl: createLightFetch(oldHtml, body => messages.push(body.text))
+  });
+  assert.match(messages[0], /🟢 00:30–02:00 · світло є/);
+  assert.doesNotMatch(messages[0], /🟡/);
+  const result = await runPluginJob(lightPlugin, {}, {
+    config, logger: createSilentLogger(),
+    fetchImpl: createLightFetch(newHtml, body => messages.push(body.text))
+  });
+  assert.equal(result.notified, false);
+  assert.equal(messages.length, 2);
+});
+
+test("strict light mode preserves yellow and detects its change to green", async () => {
+  const dir = await createTempDir();
+  const oldHtml = createPoeHtml([2, 3, 1, 1]);
+  const newHtml = createPoeHtml([2, 1, 1, 1]);
+  const config = buildLightConfig(dir, { LIGHT_TREAT_YELLOW_AS_GREEN: "false", LIGHT_CURRENT_MINUTE: "0" });
+  const messages = [];
+  await runPluginJob(lightPlugin, {}, {
+    config, logger: createSilentLogger(),
+    fetchImpl: createLightFetch(oldHtml, body => messages.push(body.text))
+  });
+  assert.match(messages[0], /🟡 00:30–01:00 · можливо є/);
+  const result = await runPluginJob(lightPlugin, {}, {
+    config, logger: createSilentLogger(),
+    fetchImpl: createLightFetch(newHtml, body => messages.push(body.text))
+  });
+  assert.equal(result.notified, true);
+  assert.equal(messages.length, 3);
+});
+
+test("changing from strict to green mode does not announce a POE schedule change", async () => {
+  const dir = await createTempDir();
+  const html = createPoeHtml([2, 3, 1, 1]);
+  const strict = buildLightConfig(dir, { LIGHT_TREAT_YELLOW_AS_GREEN: "false" });
+  const green = buildLightConfig(dir);
+  const messages = [];
+  await runPluginJob(lightPlugin, {}, {
+    config: strict, logger: createSilentLogger(),
+    fetchImpl: createLightFetch(html, body => messages.push(body.text))
+  });
+  const switched = await runPluginJob(lightPlugin, {}, {
+    config: green, logger: createSilentLogger(),
+    fetchImpl: createLightFetch(html, body => messages.push(body.text))
+  });
+  assert.equal(switched.notified, false);
+  assert.equal(messages.length, 2);
+});
+
+test("default light mode sends a confirmed-on reminder at the yellow start", async () => {
+  const dir = await createTempDir();
+  const html = createPoeHtml([2, 3, 1, 1]);
+  const config = buildLightConfig(dir, {
+    LIGHT_CURRENT_MINUTE: "20",
+    LIGHT_OUTAGE_REMINDER_BEFORE_MINUTES: "10"
+  });
+  const previousState = parseLightSchedule(html, 2, 2);
+  await writeJobState(config.job.stateFilePath, lightPlugin.getStateKey(config), previousState,
+    lightPlugin.getStateFingerprint(previousState));
+  const messages = [];
+  const result = await runPluginJob(lightPlugin, {}, {
+    config, logger: createSilentLogger(),
+    fetchImpl: createLightFetch(html, body => messages.push(body.text))
+  });
+  assert.equal(result.notified, true);
+  assert.equal(messages.length, 1);
+  assert.match(messages[0], /🟢 Світло з’явиться через 10 хв/);
+  assert.match(messages[0], /00:30–02:00/);
+  assert.doesNotMatch(messages[0], /🟡/);
+});
+
 test("light runner sends upcoming outage reminder only once", async () => {
   const dir = await createTempDir();
   const html = createPoeHtml([1, 1, 2, 3]);
@@ -276,10 +496,10 @@ test("light runner sends upcoming outage reminder only once", async () => {
     ...parseLightSchedule(html, config.poe.queue, config.poe.subQueue, {
       now: new Date("2026-06-30T00:55:00")
     }),
+    treatYellowAsGreen: true,
     sourceUrl: config.poe.url,
     currentMinute: 55,
     responseStatus: 200,
-    postResponseStatus: 200
   };
 
   await writeJobState(
@@ -301,9 +521,9 @@ test("light runner sends upcoming outage reminder only once", async () => {
   assert.equal(firstResult.changed, false);
   assert.equal(firstResult.notified, true);
   assert.equal(telegramMessages.length, 1);
-  assert.match(telegramMessages[0], /Нагадування про відключення/);
-  assert.match(telegramMessages[0], /З 01:00 - 01:30 буде відключення світла/);
-  assert.match(telegramMessages[0], /Початок через 5 хв/);
+  assert.match(telegramMessages[0], /🔴 Відключення через 5 хв/);
+  assert.match(telegramMessages[0], /01:00–01:30/);
+  assert.match(telegramMessages[0], /<blockquote expandable>/);
 
   const secondResult = await runPluginJob(lightPlugin, {}, {
     config,
@@ -322,12 +542,11 @@ test("light runner sends Telegram notification when selected queue schedule chan
   const dir = await createTempDir();
   const oldHtml = createPoeHtml([1, 1, 2, 3]);
   const newHtml = createPoeHtml([2, 2, 1, 1]);
-  const config = buildLightConfig(dir);
+  const config = buildLightConfig(dir, { LIGHT_CURRENT_MINUTE: "0" });
   const previousState = {
     ...parseLightSchedule(oldHtml, config.poe.queue, config.poe.subQueue),
     sourceUrl: config.poe.url,
     responseStatus: 200,
-    postResponseStatus: 200
   };
 
   await writeJobState(
@@ -350,11 +569,11 @@ test("light runner sends Telegram notification when selected queue schedule chan
   assert.equal(result.changed, true);
   assert.equal(result.notified, true);
   assert.equal(telegramBody.chat_id, "tg-chat");
-  assert.match(telegramBody.text, /Графік світла: 2\.2 черга/);
+  assert.match(telegramBody.text, /Змінився графік на сьогодні · черга 2\.2/);
   assert.match(telegramBody.text, /Було/);
-  assert.match(telegramBody.text, /Стало/);
-  assert.match(telegramBody.text, /Сьогодні/);
-  assert.match(telegramBody.text, /Завтра/);
+  assert.match(telegramBody.text, /Тепер/);
+  assert.doesNotMatch(telegramBody.text, /Завтра/);
+  assert.match(telegramBody.text, /<blockquote expandable>/);
   assert.deepEqual(
     logger.entries.find((entry) => entry.message === "Gemini change summary skipped")?.meta,
     {
@@ -363,6 +582,62 @@ test("light runner sends Telegram notification when selected queue schedule chan
       subQueue: 2
     }
   );
+});
+
+test("light runner retries an unsent schedule change on the next run", async () => {
+  const dir = await createTempDir();
+  const oldHtml = createPoeHtml([1, 1, 2, 3]);
+  const newHtml = createPoeHtml([2, 2, 1, 1]);
+  const config = buildLightConfig(dir, { LIGHT_TG_HTTP_MAX_RETRIES: "0", LIGHT_CURRENT_MINUTE: "0" });
+  const previousState = parseLightSchedule(oldHtml, 2, 2);
+  await writeJobState(config.job.stateFilePath, lightPlugin.getStateKey(config), previousState, lightPlugin.getStateFingerprint(previousState));
+  await assert.rejects(runPluginJob(lightPlugin, {}, {
+    config, logger: createSilentLogger(),
+    fetchImpl: async (url, options) => String(url).includes("api.telegram.org")
+      ? createTextResponse(500, JSON.stringify({ ok: false }))
+      : createLightFetch(newHtml)(url, options)
+  }));
+  let sent = 0;
+  const retry = await runPluginJob(lightPlugin, {}, {
+    config, logger: createSilentLogger(),
+    fetchImpl: createLightFetch(newHtml, () => { sent += 1; })
+  });
+  assert.equal(retry.changed, true);
+  assert.equal(sent, 1);
+});
+
+test("light runner retries only tomorrow when its second day message fails", async () => {
+  const dir = await createTempDir();
+  const oldHtml = createPoeHtml([1, 1, 1, 1], [1, 1, 1]);
+  const newHtml = createPoeHtml([2, 2, 1, 1], [1, 2, 1]);
+  const config = buildLightConfig(dir, { LIGHT_TG_HTTP_MAX_RETRIES: "0", LIGHT_CURRENT_MINUTE: "0" });
+  const previousState = parseLightSchedule(oldHtml, 2, 2);
+  await writeJobState(config.job.stateFilePath, lightPlugin.getStateKey(config), previousState,
+    lightPlugin.getStateFingerprint(previousState));
+  const firstMessages = [];
+  await assert.rejects(runPluginJob(lightPlugin, {}, {
+    config, logger: createSilentLogger(),
+    fetchImpl: async (url, options) => {
+      if (String(url).includes("api.telegram.org")) {
+        const message = JSON.parse(options.body);
+        firstMessages.push(message.text);
+        const failed = firstMessages.length === 2;
+        return createTextResponse(failed ? 403 : 200, JSON.stringify({ ok: !failed }));
+      }
+      return createTextResponse(200, newHtml);
+    }
+  }));
+  assert.equal(firstMessages.length, 2);
+  assert.match(firstMessages[0], /сьогодні/);
+  assert.match(firstMessages[1], /завтра/);
+  const retried = [];
+  await runPluginJob(lightPlugin, {}, {
+    config, logger: createSilentLogger(),
+    fetchImpl: createLightFetch(newHtml, body => retried.push(body.text))
+  });
+  assert.equal(retried.length, 1);
+  assert.match(retried[0], /завтра/);
+  assert.doesNotMatch(retried[0], /<b>Сьогодні<\/b>/);
 });
 
 test("light runner sends schedule change and outage reminder as separate messages", async () => {
@@ -380,7 +655,6 @@ test("light runner sends schedule change and outage reminder as separate message
     sourceUrl: config.poe.url,
     currentMinute: 55,
     responseStatus: 200,
-    postResponseStatus: 200
   };
 
   await writeJobState(
@@ -403,11 +677,11 @@ test("light runner sends schedule change and outage reminder as separate message
   assert.equal(result.notified, true);
   assert.equal(telegramMessages.length, 2);
   assert.match(telegramMessages[0], /Було/);
-  assert.match(telegramMessages[0], /Стало/);
-  assert.doesNotMatch(telegramMessages[0], /Нагадування про відключення/);
-  assert.match(telegramMessages[1], /Нагадування про відключення/);
+  assert.match(telegramMessages[0], /Тепер/);
+  assert.doesNotMatch(telegramMessages[0], /🔴 Відключення через/);
+  assert.match(telegramMessages[1], /🔴 Відключення через/);
   assert.doesNotMatch(telegramMessages[1], /Було/);
-  assert.doesNotMatch(telegramMessages[1], /Стало/);
+  assert.doesNotMatch(telegramMessages[1], /Тепер/);
 });
 
 test("light runner asks Gemini to explain changed segments when configured", async () => {
@@ -416,13 +690,14 @@ test("light runner asks Gemini to explain changed segments when configured", asy
   const newHtml = createPoeHtml([2, 2, 1, 1]);
   const config = buildLightConfig(dir, {
     LIGHT_GEMINI_API_KEY: "gemini-key",
+    LIGHT_TREAT_YELLOW_AS_GREEN: "false",
+    LIGHT_CURRENT_MINUTE: "0",
     LIGHT_GEMINI_RETRY_BASE_DELAY_MS: "100"
   });
   const previousState = {
     ...parseLightSchedule(oldHtml, config.poe.queue, config.poe.subQueue),
     sourceUrl: config.poe.url,
     responseStatus: 200,
-    postResponseStatus: 200
   };
 
   await writeJobState(
@@ -463,10 +738,6 @@ test("light runner asks Gemini to explain changed segments when configured", asy
         return createTextResponse(200, JSON.stringify({ ok: true }));
       }
 
-      if (options.method === "POST") {
-        return createTextResponse(200, "post ok");
-      }
-
       return createTextResponse(200, newHtml);
     }
   });
@@ -485,10 +756,10 @@ test("light runner asks Gemini to explain changed segments when configured", asy
   assert.match(geminiBody.contents[0].parts[0].text, /Не використовуй слово 'перемикання' у відповіді/);
   assert.match(geminiBody.contents[0].parts[0].text, /Для висновку орієнтуйся насамперед на OLD_OUTAGES і NEW_OUTAGES/);
   assert.doesNotMatch(geminiBody.contents[0].parts[0].text, /statusLabel/);
-  assert.match(telegramBody.text, /Що змінилось/);
   assert.match(telegramBody.text, /Світло вимикатимуть раніше/);
   assert.match(telegramBody.text, /Було/);
-  assert.match(telegramBody.text, /Стало/);
+  assert.match(telegramBody.text, /Тепер/);
+  assert.match(telegramBody.text, /Світло вимикатимуть раніше[^]*<blockquote expandable>[^]*Було[^]*Тепер[^]*<\/blockquote>/);
   assert.equal(
     logger.entries.some(
       (entry) =>
@@ -510,6 +781,38 @@ test("light runner asks Gemini to explain changed segments when configured", asy
     ),
     true
   );
+});
+
+test("first publication of tomorrow sends its schedule without a Gemini comparison", async () => {
+  const dir = await createTempDir();
+  const config = buildLightConfig(dir, { LIGHT_GEMINI_API_KEY: "gemini-key" });
+  const previousState = {
+    ...parseLightSchedule(createPoeHtml([1, 1, 2, 3], []), 2, 2),
+    sourceUrl: config.poe.url
+  };
+  await writeJobState(config.job.stateFilePath, lightPlugin.getStateKey(config), previousState,
+    lightPlugin.getStateFingerprint(previousState));
+
+  const messages = [];
+  let geminiCalls = 0;
+  const fetchImpl = async (url, options = {}) => {
+    if (String(url).includes("api.telegram.org")) {
+      messages.push(JSON.parse(options.body).text);
+      return createTextResponse(200, JSON.stringify({ ok: true }));
+    }
+    if (String(url).includes("generativelanguage.googleapis.com")) {
+      geminiCalls += 1;
+      return createTextResponse(200, JSON.stringify({ candidates: [{ content: { parts: [{ text: "Зміна" }] } }] }));
+    }
+    return createTextResponse(200, createPoeHtml([1, 1, 2, 3], [1, 1, 2, 2]));
+  };
+  await runPluginJob(lightPlugin, {}, { config, logger: createSilentLogger(), fetchImpl });
+
+  assert.equal(geminiCalls, 0);
+  assert.equal(messages.length, 1);
+  assert.match(messages[0], /З’явився графік на завтра · черга/);
+  assert.match(messages[0], /00:00–01:00/);
+  assert.doesNotMatch(messages[0], /Було|Стало|Що змінилось|blockquote/);
 });
 
 test("light stub mode reads local html and skips POE requests", async () => {
@@ -542,5 +845,5 @@ test("light stub mode reads local html and skips POE requests", async () => {
   assert.equal(result.notified, true);
   assert.equal(poeCalls, 0);
   assert.equal(telegramBody.chat_id, "tg-chat");
-  assert.match(telegramBody.text, /Графік світла: 2\.2 черга/);
+  assert.match(telegramBody.text, /З’явився графік на завтра · черга 2\.2/);
 });

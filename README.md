@@ -33,7 +33,6 @@ One-shot Node.js job that fetches active air raid alert state for a region and t
    Open `http://127.0.0.1:3010/` to edit the schedule or the exact HTML returned by the mock. Point the worker at the mock with:
    ```env
    LIGHT_POE_URL=http://127.0.0.1:3010/customs/dynamicgpv-info.php
-   LIGHT_POE_POST_URL=http://127.0.0.1:3010/customs/search-disconnection.php
    ```
 
 4. Run tests:
@@ -78,24 +77,86 @@ One-shot Node.js job that fetches active air raid alert state for a region and t
 - `LIGHT_QUEUE` (optional): queue number, `1..6`. Falls back to xbar-style `VAR_QUEUE`, then `5`.
 - `LIGHT_SUB_QUEUE` (optional): subqueue number, `1..2`. Falls back to xbar-style `VAR_SUB_QUEUE`, then `1`.
 - `LIGHT_TG_CHAT_ID` (optional): Telegram chat/channel for light notifications. Falls back to `TG_CHAT_ID`.
-- `LIGHT_POE_URL` (optional): POE HTML schedule URL. Default `https://www.poe.pl.ua/customs/dynamicgpv-info.php`.
-- `LIGHT_POE_POST_URL` (optional): POE disconnection search URL. Default `https://www.poe.pl.ua/customs/search-disconnection.php`.
+- `LIGHT_SUBSCRIPTIONS_FILE` (optional): path to a JSON file with queue/subqueue/chat subscriptions. When set, the light job fetches POE once and processes every subscription; `LIGHT_QUEUE`, `LIGHT_SUB_QUEUE`, and `LIGHT_TG_CHAT_ID` are used only by the single-queue mode and test commands.
+- `LIGHT_POE_URL` (optional): POE HTML schedule URL. Default `https://www.poe.pl.ua/customs/dynamicgpv-info.php`. Plain HTTP is accepted only for localhost mock URLs.
 - `LIGHT_MOCK_HOST` / `LIGHT_MOCK_PORT` (optional): host and port for `npm run start:light:mock`. Defaults to `127.0.0.1:3010`.
-- `LIGHT_POST_BODY_JSON` (optional): JSON body encoded as `disconn=...` for the POE POST request. Defaults to the same address payload from the xbar script.
-- `LIGHT_USE_STUB` (optional): if `true`, skips POE GET/POST requests and reads HTML from `LIGHT_STUB_FILE`. Default `false`.
+- `LIGHT_USE_STUB` (optional): if `true`, skips the POE GET request and reads HTML from `LIGHT_STUB_FILE`. Default `false`.
 - `LIGHT_STUB_FILE` (optional): local HTML fixture for stub mode. Default `light-example.html`.
+- `LIGHT_TREAT_YELLOW_AS_GREEN` (optional): defaults to `true`. Treats POE yellow `light_3` periods as light on in messages, change comparisons, Gemini summaries, and return reminders. Set `false` to show yellow as tentative and say light may return. POE's raw statuses remain in saved state, so switching modes alone does not announce a schedule change.
+- `LIGHT_SCHEDULE_IMAGE_ENABLED` (optional): defaults to `true`. Each schedule publication or revision sends one post with a compact timeline photo and the full text as its caption. If the text exceeds Telegram's photo-caption limit, the bot sends a text-only post to preserve the full schedule. Set `false` to send text only. Outage reminders remain text messages.
+- `LIGHT_PIN_TODAY_SCHEDULE` (optional): defaults to `true`. The first today post is pinned per chat. Later today revisions still send their usual comparison post and update the pinned post to the current image and full schedule. On the first run after enabling this feature, or after a new day begins, the worker sends a current today snapshot and pins it. The bot needs permission to pin messages. Set `false` to disable this behavior.
+- `LIGHT_SCHEDULE_IMAGE_LAYOUT` (optional): `horizontal` by default. Set `vertical` to try two side-by-side 12-hour vertical timelines, each divided into 30-minute cells. The setting changes only the generated image.
+
+The image renderer uses `sharp`; run `npm ci` after updating the VM. Install a font with Ukrainian Cyrillic glyphs (for example `fonts-dejavu-core` on Debian) so the timeline labels render correctly.
 - `GEMINI_API_KEY` or `LIGHT_GEMINI_API_KEY` (optional): Gemini API key used to summarize what changed between old and new light segments.
-- `LIGHT_GEMINI_ENABLED` (optional): enables Gemini summaries. If unset, Gemini is enabled automatically when an API key is present. Default in `.env.example` is `false` to avoid accidental API usage.
+- `LIGHT_GEMINI_ENABLED` (optional): enables Gemini summaries. If unset, Gemini is enabled automatically when an API key is present. Set it to `false` to disable summaries.
 - `LIGHT_GEMINI_MODEL` (optional): Gemini model ID. Default `models/gemini-flash-lite-latest`.
 - `LIGHT_GEMINI_API_BASE_URL` (optional): default `https://generativelanguage.googleapis.com/v1beta`.
 - `LIGHT_GEMINI_TIMEOUT_MS`, `LIGHT_GEMINI_MAX_RETRIES`, `LIGHT_GEMINI_RETRY_BASE_DELAY_MS` (optional): Gemini request retry settings.
 - `LIGHT_GEMINI_TEMPERATURE`, `LIGHT_GEMINI_MAX_OUTPUT_TOKENS` (optional): Gemini generation settings.
+- `LIGHT_GEMINI_MIN_INTERVAL_MINUTES`, `LIGHT_GEMINI_MAX_DAILY_REQUESTS` (optional): multi-group Gemini request budget. Defaults to at most one request every 5 minutes and 20 requests in any rolling 24 hours. When the budget is reached, notifications still send with raw old/new schedules.
 - `LIGHT_HTTP_TIMEOUT_MS`, `LIGHT_HTTP_MAX_RETRIES`, `LIGHT_HTTP_RETRY_BASE_DELAY_MS` (optional): light job HTTP retry settings; fall back to shared `HTTP_*` values.
 - `LIGHT_TG_HTTP_TIMEOUT_MS`, `LIGHT_TG_HTTP_MAX_RETRIES`, `LIGHT_TG_HTTP_RETRY_BASE_DELAY_MS` (optional): light Telegram retry settings; fall back to shared `TG_HTTP_*` values.
 - `LIGHT_LOCK_FILE_PATH` (optional): default `.light-job.lock`.
 - `LIGHT_STATE_FILE_PATH` (optional): default `.light-last-state.json`.
 - `LIGHT_ALWAYS_SEND_TG_MESSAGE` (optional): if `true`, sends a Telegram message on every run. Default `false`.
-- `LIGHT_OUTAGE_REMINDER_BEFORE_MINUTES` (optional): sends a one-time reminder when today’s next outage starts in `N` minutes or less. Default `0` disables reminders.
+- `LIGHT_OUTAGE_REMINDER_BEFORE_MINUTES` (optional): sends one reminder before each turn-off and turn-on transition when it starts in `N` minutes or less. Default `0` disables reminders. Reminder IDs include the date so the same time can notify again tomorrow.
+- `LIGHT_CURRENT_MINUTE` (optional): override the local clock for a regular light run with an integer from `0` to `1439`; the live scenario command uses `--time HH:MM` instead.
+
+### Local POE mock
+
+`npm run start:light:mock` serves a horizontally scrolling 48-cell schedule builder for today and tomorrow, queues `1–6`, and subqueues `1–2`. Builder edits save automatically. The raw editor can replace exactly the HTML returned by `GET /customs/dynamicgpv-info.php`; “Load generated” copies the current builder output into the editor, and “Use schedule builder” switches the endpoint back to generated HTML. The mock still supports `POST /customs/search-disconnection.php` for compatibility, but the light worker does not call it. Changes take effect without restarting the server.
+
+### Multiple queues and Telegram groups
+
+Copy `light-subscriptions.example.json` to `light-subscriptions.json` and set `LIGHT_SUBSCRIPTIONS_FILE=light-subscriptions.json` in `.env` or the light systemd service. The example lists all 12 queue and subqueue keys, disabled by default. Set `enabled` to `true` and put one or more Telegram chat IDs in `chatIds` for each queue you want to track. You may remove unused keys; at least one enabled queue with a chat ID is required. Duplicate chat IDs within one queue are rejected. The old `subscriptions` array remains accepted during migration. Keep `TG_BOT_TOKEN` in `.env`, not the JSON file. The local `light-subscriptions.json` file is ignored by Git.
+
+`npm run start:light` remains the systemd command. With the subscriptions file configured, each run fetches the POE schedule once, evaluates each unique queue, and sends Telegram messages to the corresponding chats. Delivery state is saved per queue and chat. If one chat fails, other successful deliveries stay recorded, and only the failed chat retries on the next run. The first run in multi-group mode sends an initial schedule to every configured chat; the old single-queue state is not reused.
+
+Today's and tomorrow's schedules are matched by calendar date and always sent as separate posts, including on the first run. Each post has the full text in the photo caption. When tomorrow's schedule first appears, it is sent without an old/new comparison or Gemini request. Later changes to a published schedule show aligned “Було” and “Тепер” timelines for that date. A change only to tomorrow sends only the tomorrow post. If both days change, both are sent; a failed second day retries without resending the first. Revisions show the Gemini summary when available and full old/new periods in the caption. Reminders put the full current schedule in an expandable quote. Each day's text and image show daily light-on and light-off totals as `🟢 +HH:MM · 🔴 −HH:MM`. By default, both POE green and yellow periods appear as 🟢 light on, with adjoining periods merged. Set `LIGHT_TREAT_YELLOW_AS_GREEN=false` to show yellow periods and their total as 🟡 tentative and send cautious return reminders; 🔴 always means light off.
+
+If a successful POE response contains no schedule table and explicitly says that GPV/outages are not planned, the worker treats today as `00:00–24:00` light on (`🟢 +24:00 · 🔴 −0:00`). A previously published outage schedule then produces a normal today revision with a fixed no-schedule summary, without asking Gemini. An absent tomorrow table in that response does not announce a tomorrow cancellation. A missing queue row in a present table or an unrelated error page still fails parsing. The exact POE wording for this case has not yet been captured, so the notice matcher may need adjustment when a real response is available.
+
+For today's revisions, a change that affects only completed 30-minute cells is saved without notifying or calling Gemini. The current cell is still relevant until it ends. Gemini receives only relevant changed windows and schedule context beginning one cell before the current cell; a period crossing that cutoff retains its original start. Tomorrow's changes are compared across the full day.
+
+If Gemini is enabled, one batch request covers all changed queue schedules in that run, including queues followed by multiple chats. No Gemini call is made for unchanged schedules, reminders, or initial schedules without a previous version. Successful summaries are cached for the same schedule change and half-hour time slot. A failed or incomplete Gemini response falls back to the raw old/new schedule, with a 15-minute cooldown before another attempt for the same change. A rolling request budget defaults to at most one Gemini attempt every 5 minutes and 20 attempts per 24 hours; the cache keeps its 100 most recent entries. These safeguards reduce free-tier usage but cannot guarantee availability when the same Google project is used elsewhere.
+The batch makes no immediate retry after a Gemini error; `LIGHT_GEMINI_MAX_RETRIES` still applies to the legacy single-queue path.
+
+### Live light notification scenarios
+
+Set `TG_BOT_TOKEN` in `.env`. If `LIGHT_SUBSCRIPTIONS_FILE` is configured, each case sends real Telegram messages to every subscribed chat using its assigned queue; otherwise set `LIGHT_TG_CHAT_ID` for a single demo group. For Gemini-powered revision cases, also set `GEMINI_API_KEY` or `LIGHT_GEMINI_API_KEY`. `no-schedule-today` uses a fixed summary, and `tomorrow-appears` skips Gemini even when a key is configured:
+
+```sh
+npm run test:light:live -- --list
+npm run test:light:live -- --case initial
+npm run test:light:live -- --case schedule-change
+npm run test:light:live -- --case today-shorter
+npm run test:light:live -- --case tomorrow-appears
+npm run test:light:live -- --case tomorrow-change
+npm run test:light:live -- --case double-change
+npm run test:light:live -- --case no-schedule-today
+npm run test:light:live -- --case off-reminder --time 20:50
+npm run test:light:live -- --case tentative-on --time 15:50
+npm run test:light:live -- --case midnight-off --time 23:50
+npm run test:light:live -- --case midnight-tentative-on --time 23:50
+npm run test:light:live -- --case schedule-and-off --time 20:50
+LIGHT_SCHEDULE_IMAGE_LAYOUT=vertical npm run test:light:live -- --case initial
+LIGHT_SCHEDULE_IMAGE_LAYOUT=vertical npm run test:light:live -- --case today-shorter
+```
+
+`--time HH:MM` sets the worker's current local clock time for the run. Each case has a default time shown by `--list`; `--lead N` changes the reminder window from the default 10 minutes. Without subscriptions, `--queue 1..6` and `--subqueue 1..2` select the queue shown in the message (defaults `5.1`). With subscriptions, each configured queue is used and these two flags are unavailable. A reminder sends only if its transition falls after the selected time and within the lead window. `schedule-and-off` sends a revision to each subscribed queue and an off reminder only to queues approaching their fixed outage start. The scenarios use a demo fixture derived from all 12 POE queues captured on 6 October 2026. Three rows were adjusted to follow the cycle rules below. `schedule-change` extends today's first outage by 30 minutes; `today-shorter` and `tomorrow-change` shorten an outage by 30 minutes. `double-change` shortens one tomorrow outage and extends another in the same message. `no-schedule-today` serves a 200 OK mock HTML notice without a table and changes a previously scheduled day to all green; no Gemini key is needed for this case. These revision cases keep outage starts fixed and move each 30-minute tentative return period with the corresponding outage end. Each command starts a temporary local POE mock server, fetches its GET endpoint once, and uses isolated state, so it does not call live POE or change the mock builder at `127.0.0.1:3010` or the worker's saved state. Live scenario commands disable pinning so their temporary state cannot leave unmanaged pins in demo chats.
+
+**Mock schedule rules:** Each queue has its own six-hour cycle times, which may differ between today and tomorrow. Subqueue 1 outage starts are on the hour; subqueue 2 starts are on the half-hour. The day contains four such cycles; a cycle may be entirely green. When an outage is scheduled, the sequence is red (no power), exactly one 30-minute tentative return period, then green (power on) until the next fixed outage start. A schedule revision changes only the end of the red period: extending it moves the tentative period later and shortens green time; shortening it does the reverse. The start of that outage does not move. The earlier `start-later` demo was removed because it violated this rule. The old definite `on-reminder` mock was removed because it skipped the required tentative return period; whether to remind before confirmed green is still to be decided. These are rules for generating mock changes; the worker still parses the actual POE schedule as received.
+
+To fetch the **real POE schedule** and emulate the current local time, use:
+
+```sh
+npm run test:light:poe -- --time 16:50
+npm run test:light:poe -- --time 17:50 --queue 5 --subqueue 1 --lead 20
+npm run test:light:poe -- --time 23:50 --always
+```
+
+This command always calls the official POE schedule GET endpoint, even if `.env` points the regular worker at localhost. It sends real Telegram messages to `LIGHT_TG_CHAT_ID` (or `TG_CHAT_ID`). It keeps its own state in `.light-poe-test-state.json`, so the first run sends the current schedule and later runs send only changes or reminders within `--lead` minutes. `--always` also sends the schedule when it is unchanged. Choose a time just before a transition in the **actual POE schedule** to trigger a reminder; the examples alone do not guarantee one. With a Gemini API key configured, a later changed schedule makes a real Gemini request. The emulated time uses today's local date.
 
 ## Cron Setup (Every N Minutes)
 
@@ -117,7 +178,7 @@ Example light job every minute:
 
 - `src/lib/`: shared one-shot job runner, lock, logger, config readers, HTTP retry client, Telegram sender, and keyed JSON state store.
 - `src/jobs/alerts/`: alert-specific config, API parsing, state fingerprinting, and Telegram message text.
-- `src/jobs/light/`: POE queue/subqueue schedule job. Its state key is the configured `LIGHT_QUEUE` + `LIGHT_SUB_QUEUE`.
+- `src/jobs/light/`: POE schedule job. Single-queue mode uses the configured queue/subqueue; multi-group mode uses a subscriptions JSON file and per-chat delivery state.
 
 ## Notes
 
@@ -136,7 +197,7 @@ Example light job every minute:
 - Logs are emitted as JSON lines for easier ingestion in production logging systems.
 - Logs are persisted to `LOG_FILE_PATH` (default `alerts.log` in project root). The default `.gitignore` already excludes `*.log`.
 - Logs are also buffered during a run and pushed to Loki after the job finishes at `LOKI_PROTOCOL://LOKI_IP:LOKI_PORT/loki/api/v1/push` with `app`, `level`, and `job` stream labels.
-- The light job fetches both POE endpoints from the xbar script, parses today/tomorrow tables, and sends a Telegram message only when the selected queue/subqueue schedule fingerprint changes.
+- The light job fetches the POE schedule with one GET request, parses today/tomorrow tables, and sends a Telegram message only when the selected queue/subqueue schedule fingerprint changes.
 - For light job development without touching POE, set `LIGHT_USE_STUB=true`; by default it parses `light-example.html` from the project root.
-- When Gemini is enabled, changed light notifications send normalized previous/current segments to Gemini using `models/{model}:generateContent` and display the returned summary above `Було` / `Стало`. If Gemini fails, the notification still sends with the raw old/new schedules.
-- The light job can also send a separate one-time outage reminder with `LIGHT_OUTAGE_REMINDER_BEFORE_MINUTES`, for example when an outage starts within the next 10 minutes. Sent reminders are persisted in `LIGHT_STATE_FILE_PATH` so cron does not repeat them every run.
+- When Gemini is enabled, changed light notifications send normalized previous/current segments to Gemini using `models/{model}:generateContent` and display the returned summary above an expandable quote with `Було` / `Тепер`. If Gemini fails, the quote still contains the full old and new schedules.
+- The light job also sends one reminder before each turn-off and turn-on transition when `LIGHT_OUTAGE_REMINDER_BEFORE_MINUTES` is set. Sent reminders are persisted in `LIGHT_STATE_FILE_PATH` and keyed by date so they can recur on later days.

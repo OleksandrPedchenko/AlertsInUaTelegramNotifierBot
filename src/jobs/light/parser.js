@@ -135,10 +135,48 @@ function prettyTime(minutes) {
   return `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, "0")}`;
 }
 
+function hasExplicitNoScheduleNotice(response) {
+  if (response.todayTable) return false;
+  const text = response.dom.window.document.body.textContent.replace(/\s+/g, " ").toLowerCase();
+  return /(?:гпв|графік|відключенн)/u.test(text) &&
+    /(?:не\s+(?:запланован|запроваджен|застосов|передбачен)\w*|відсутн\w*|немає)/u.test(text);
+}
+
+function allDayLight() {
+  return {
+    timePeriods: [{
+      status: STATUS.turnedOn,
+      state: STATUS.turnedOn,
+      startMin: 0,
+      endMin: 1440,
+      statusLabel: STATUS_LABELS[STATUS.turnedOn],
+      time: "00:00 - 24:00",
+      current: true,
+      durationMinutes: 1440
+    }],
+    totalTimeOn: 1440,
+    totalTimeOff: 0
+  };
+}
+
 function parseLightSchedule(html, queue, subQueue, options = {}) {
   const response = new PoeResponse(html);
   const todayParser = new Parser(response.todayTable, queue, subQueue, options);
   const tomorrowParser = new Parser(response.tomorrowTable, queue, subQueue, options);
+
+  const hasSchedule = Array.from(todayParser.elements).some((cell) =>
+    [...cell.classList].some((name) => /^light_[123]$/.test(name))
+  );
+  if (!hasSchedule) {
+    if (hasExplicitNoScheduleNotice(response)) {
+      return {
+        queue, subQueue, updatedAt: response.updatedAt, noScheduleToday: true,
+        today: allDayLight(),
+        tomorrow: { timePeriods: [], totalTimeOn: 0, totalTimeOff: 0 }
+      };
+    }
+    throw new Error(`POE schedule row ${queue}.${subQueue} is missing or invalid`);
+  }
 
   return {
     queue,

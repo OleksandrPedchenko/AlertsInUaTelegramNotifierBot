@@ -1,0 +1,16 @@
+{
+  "queues": {
+    "1.1": { "enabled": false, "chatIds": [] },
+    "1.2": { "enabled": false, "chatIds": [] },
+    "2.1": { "enabled": false, "chatIds": [] },
+    "2.2": { "enabled": false, "chatIds": [] },
+    "3.1": { "enabled": false, "chatIds": [] },
+    "3.2": { "enabled": false, "chatIds": [] },
+    "4.1": { "enabled": false, "chatIds": [] },
+    "4.2": { "enabled": false, "chatIds": [] },
+    "5.1": { "enabled": false, "chatIds": [] },
+    "5.2": { "enabled": false, "chatIds": [] },
+    "6.1": { "enabled": false, "chatIds": [] },
+    "6.2": { "enabled": false, "chatIds": [] }
+  }
+}
