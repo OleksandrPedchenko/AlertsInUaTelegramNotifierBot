@@ -117,6 +117,7 @@ function hasPublishedSchedule(day) {
 function getChangedDays(previousState, currentState) {
   if (!previousState) return [];
   return ["today", "tomorrow"].filter(day =>
+    !(day === "tomorrow" && currentState.noScheduleToday && !hasPublishedSchedule(currentState.tomorrow)) &&
     dayFingerprint(effectiveDay(previousScheduleForDay(previousState, currentState, day), currentState.treatYellowAsGreen)) !==
     dayFingerprint(effectiveDay(currentState[day], currentState.treatYellowAsGreen))
   );
@@ -303,6 +304,10 @@ const lightPlugin = {
       hasPublishedSchedule(previousScheduleForDay(previousState, currentState, day))
     );
     const summaries = { ...(deps.changeSummaries || {}) };
+    if (currentState.noScheduleToday && changedDays.includes("today")) {
+      summaries.today = "🟢 ГПВ на сьогодні не заплановано. Світло за графіком 00:00–24:00.";
+    }
+    const geminiDays = revisedDays.filter(day => !(day === "today" && currentState.noScheduleToday));
     const notifications = [];
 
     if (!previousState) {
@@ -317,9 +322,9 @@ const lightPlugin = {
         queue: currentState.queue,
         subQueue: currentState.subQueue
       });
-    } else if (revisedDays.length === 0) {
+    } else if (geminiDays.length === 0) {
       deps.logger.info("Gemini change summary skipped", {
-        reason: "schedule-first-published",
+        reason: currentState.noScheduleToday ? "no-schedule-notice" : "schedule-first-published",
         queue: currentState.queue,
         subQueue: currentState.subQueue
       });
@@ -345,7 +350,7 @@ const lightPlugin = {
           currentTomorrowPeriods: currentState.tomorrow.timePeriods.length
         });
 
-        const firstDay = revisedDays[0];
+        const firstDay = geminiDays[0];
         const priorForPrompt = {
           ...previousState,
           today: previousScheduleForDay(previousState, currentState, "today") || { timePeriods: [] },

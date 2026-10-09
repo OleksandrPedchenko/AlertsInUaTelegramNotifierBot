@@ -51,6 +51,51 @@ test("time override validates HH:MM", () => {
   assert.throws(() => parseClockTime("9:00"), /HH:MM/);
 });
 
+test("live no-schedule response replaces today's outages with 24 hours of light", async () => {
+  const actual = await execute("no-schedule-today", "12:00");
+  assert.equal(actual.result.notified, true);
+  assert.equal(actual.messages.length, 1);
+  assert.match(actual.messages[0].text, /Змінився графік на сьогодні/);
+  assert.match(actual.messages[0].text, /🟢 ГПВ на сьогодні не заплановано/);
+  assert.match(actual.messages[0].text, /Тепер[^]*🟢 00:00–24:00 · світло є/);
+  assert.match(actual.messages[0].text, /🟢 \+24:00 · 🔴 −0:00/);
+  assert.doesNotMatch(actual.messages[0].text, /Завтра/);
+  assert.equal(actual.geminiCalls, 0);
+});
+
+test("fan-out no-schedule response sends one today revision without a Gemini request", async () => {
+  const dir = await createTempDir();
+  const subscriptionsFile = path.join(dir, "subscriptions.json");
+  await fs.writeFile(subscriptionsFile, JSON.stringify({ queues: {
+    "5.1": { enabled: true, chatIds: ["demo-chat"] }
+  } }));
+  let poeGets = 0;
+  let geminiCalls = 0;
+  const messages = [];
+  const result = await runScenario({ caseName: "no-schedule-today", time: "12:00",
+    env: { ...baseEnv, GEMINI_API_KEY: "", LIGHT_SUBSCRIPTIONS_FILE: subscriptionsFile },
+    fetchImpl: (url, options) => {
+      const target = String(url);
+      if (target.includes("api.telegram.org")) {
+        messages.push(JSON.parse(options.body));
+        return Promise.resolve(createTextResponse(200, JSON.stringify({ ok: true })));
+      }
+      if (target.includes("generativelanguage.googleapis.com")) {
+        geminiCalls += 1;
+        throw new Error("No Gemini request expected");
+      }
+      poeGets += 1;
+      return fetch(url, options);
+    }
+  });
+  assert.equal(result.notificationCount, 1);
+  assert.equal(poeGets, 1);
+  assert.equal(geminiCalls, 0);
+  assert.equal(messages.length, 1);
+  assert.match(messages[0].text, /🟢 ГПВ на сьогодні не заплановано/);
+  assert.match(messages[0].text, /🟢 \+24:00 · 🔴 −0:00/);
+});
+
 test("Gemini cases require an API key before sending", async () => {
   await assert.rejects(
     runScenario({ caseName: "schedule-change", env: { TG_BOT_TOKEN: "test", LIGHT_TG_CHAT_ID: "demo" } }),

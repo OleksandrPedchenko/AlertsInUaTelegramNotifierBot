@@ -156,6 +156,7 @@ async function prepareGeminiSummaries(items, config, deps) {
     item.changeCacheKeys = {};
     if (!item.previousState) continue;
     for (const day of getRelevantChangedDays(item.previousState, item.currentState)) {
+      if (day === "today" && item.currentState.noScheduleToday) continue;
       const previousDay = previousScheduleForDay(item.previousState, item.currentState, day);
       if (!previousDay?.timePeriods?.length) continue;
       const change = { ...item, day,

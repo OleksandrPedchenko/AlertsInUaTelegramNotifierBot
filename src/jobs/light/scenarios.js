@@ -20,6 +20,7 @@ const CASES = Object.freeze({
   "tomorrow-appears": { time: "12:00", description: "Tomorrow schedule first published without a comparison" },
   "tomorrow-change": { time: "12:00", description: "Tomorrow's outage shortens by 30 minutes, with a real Gemini summary", gemini: true },
   "double-change": { time: "12:00", description: "Two tomorrow outages change: one shortens and one extends", gemini: true },
+  "no-schedule-today": { time: "12:00", description: "POE returns an explicit no-schedule notice instead of today's table" },
   "off-reminder": { time: "20:50", description: "Queue 5.1 light off at its fixed 21:00 start" },
   "tentative-on": { time: "15:50", description: "Queue 5.1 tentative return begins at 16:00" },
   "midnight-off": { time: "23:50", queue: 2, subQueue: 1, description: "Queue 2.1 light off tomorrow at 00:00" },
@@ -125,6 +126,16 @@ async function runScenario({ caseName, time, queue, subQueue, leadMinutes = 10, 
       server.listen(0, "127.0.0.1", resolve);
     });
     const baseUrl = `http://127.0.0.1:${server.address().port}`;
+    if (caseName === "no-schedule-today") {
+      const html = `<div class="gpvinfodetail"><p>На сьогодні <span>ГПВ не заплановано</span>.</p>
+        <div>Демо: повідомлення POE без таблиці графіка</div></div>`;
+      const response = await fetch(`${baseUrl}/api/html`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ html })
+      });
+      if (!response.ok) throw new Error(`Could not prepare no-schedule mock HTML: ${response.status}`);
+    }
     const scenarioEnv = {
       ...env,
       LIGHT_SUBSCRIPTIONS_FILE: subscriptionsFile || "",

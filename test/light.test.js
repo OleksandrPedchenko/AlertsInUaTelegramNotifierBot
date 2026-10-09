@@ -277,6 +277,25 @@ test("light parser rejects HTML without the selected schedule row", () => {
   );
 });
 
+test("light parser treats an explicit table-free POE no-schedule response as all-day light", () => {
+  const html = `<div class="gpvinfodetail"><p>На сьогодні <span>ГПВ не заплановано</span>.</p>
+    <div>Оновлено 09.10.2026</div></div>`;
+  const schedule = parseLightSchedule(html, 1, 1);
+  assert.deepEqual(schedule.today.timePeriods.map(({ status, startMin, endMin }) =>
+    ({ status, startMin, endMin })), [{ status: 1, startMin: 0, endMin: 1440 }]);
+  assert.equal(schedule.today.totalTimeOn, 1440);
+  assert.equal(schedule.today.totalTimeOff, 0);
+  assert.equal(schedule.noScheduleToday, true);
+  assert.deepEqual(schedule.tomorrow.timePeriods, []);
+  assert.equal(schedule.updatedAt, "Оновлено 09.10.2026");
+});
+
+test("light parser does not hide a malformed schedule table behind a no-schedule notice", () => {
+  const html = `<div class="gpvinfodetail"><p>ГПВ не заплановано</p>
+    <table><tbody><tr><td>invalid row</td></tr></tbody></table></div>`;
+  assert.throws(() => parseLightSchedule(html, 1, 1), /missing or invalid/);
+});
+
 test("light reminders include turn-on transitions and reset on a new day", () => {
   const periods = [
     { state: 1, startMin: 0, endMin: 60, time: "00:00 - 01:00" },
