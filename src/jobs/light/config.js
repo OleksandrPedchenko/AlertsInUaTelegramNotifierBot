@@ -63,12 +63,12 @@ function readPoeUrl(readers, key, fallback) {
   return parsed.toString();
 }
 
-function readGeminiConfig(readers) {
+function readGeminiConfig(readers, provider) {
   const apiKey = readOptionalStringFromKeys(readers, ["LIGHT_GEMINI_API_KEY", "GEMINI_API_KEY"]);
-  const enabled =
+  const enabled = provider === "gemini" && (
     readers.env.LIGHT_GEMINI_ENABLED === undefined || readers.env.LIGHT_GEMINI_ENABLED === ""
-      ? Boolean(apiKey)
-      : readers.readBoolean("LIGHT_GEMINI_ENABLED", false);
+      ? true
+      : readers.readBoolean("LIGHT_GEMINI_ENABLED", false));
 
   if (enabled && !apiKey) {
     throw new ConfigError(
@@ -133,6 +133,10 @@ function readLokiConfig(readers) {
 }
 
 function loadLightConfig(_env, readers) {
+  const changeSummaryProvider = readers.readOptionalString("LIGHT_CHANGE_SUMMARY_PROVIDER", "local");
+  if (!["local", "gemini"].includes(changeSummaryProvider)) {
+    throw new ConfigError("LIGHT_CHANGE_SUMMARY_PROVIDER must be local or gemini");
+  }
   const scheduleImageLayout = readers.readOptionalString("LIGHT_SCHEDULE_IMAGE_LAYOUT", "horizontal");
   if (!["horizontal", "vertical"].includes(scheduleImageLayout)) {
     throw new Error("LIGHT_SCHEDULE_IMAGE_LAYOUT must be horizontal or vertical");
@@ -219,6 +223,7 @@ function loadLightConfig(_env, readers) {
       )
     },
     job: {
+      changeSummaryProvider,
       subscriptionsFilePath,
       lockFilePath: readers.readResolvedPath("LIGHT_LOCK_FILE_PATH", ".light-job.lock"),
       stateFilePath: readers.readResolvedPath("LIGHT_STATE_FILE_PATH", ".light-last-state.json"),
@@ -236,7 +241,7 @@ function loadLightConfig(_env, readers) {
       }),
       currentMinute
     },
-    gemini: readGeminiConfig(readers),
+    gemini: readGeminiConfig(readers, changeSummaryProvider),
     log: {
       logFilePath: readers.readOptionalString("LOG_FILE_PATH", "alerts.log"),
       retentionDays: readers.readNumber("LOG_RETENTION_DAYS", 7, { integer: true, min: 0 }),

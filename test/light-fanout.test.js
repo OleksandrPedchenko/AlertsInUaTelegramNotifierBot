@@ -30,7 +30,7 @@ test("fan-out fetches POE once and batches changed queues into one Gemini call",
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
   const env = {
-    TG_BOT_TOKEN: "test-token", GEMINI_API_KEY: "test-gemini", LIGHT_PIN_TODAY_SCHEDULE: "false", LIGHT_SCHEDULE_IMAGE_ENABLED: "false",
+    TG_BOT_TOKEN: "test-token", GEMINI_API_KEY: "test-gemini", LIGHT_CHANGE_SUMMARY_PROVIDER: "gemini", LIGHT_PIN_TODAY_SCHEDULE: "false", LIGHT_SCHEDULE_IMAGE_ENABLED: "false",
     LIGHT_SUBSCRIPTIONS_FILE: subscriptionsFile,
     LIGHT_CURRENT_MINUTE: "0",
     LIGHT_POE_URL: `${base}/customs/dynamicgpv-info.php`,
@@ -93,6 +93,40 @@ test("fan-out fetches POE once and batches changed queues into one Gemini call",
   }
 });
 
+test("fan-out defaults to local summaries for every chat without Gemini calls", async () => {
+  const dir = await createTempDir();
+  const file = path.join(dir, "subscriptions.json");
+  const stubFile = path.join(dir, "poe.html");
+  await fs.writeFile(file, JSON.stringify({ subscriptions: [
+    { queue: 1, subQueue: 1, chatId: "first" },
+    { queue: 1, subQueue: 1, chatId: "second" }
+  ] }));
+  const state = createDefaultState();
+  state.days.today["1.1"] = Array(48).fill(1);
+  state.days.today["1.1"].fill(2, 34, 36);
+  await fs.writeFile(stubFile, renderPoeHtml(state));
+  const env = {
+    TG_BOT_TOKEN: "test-token", GEMINI_API_KEY: "unused-key",
+    LIGHT_SUBSCRIPTIONS_FILE: file, LIGHT_USE_STUB: "true", LIGHT_STUB_FILE: stubFile,
+    LIGHT_PIN_TODAY_SCHEDULE: "false", LIGHT_SCHEDULE_IMAGE_ENABLED: "false",
+    LIGHT_STATE_FILE_PATH: path.join(dir, "state.json"), LIGHT_LOCK_FILE_PATH: path.join(dir, "light.lock"),
+    LIGHT_CURRENT_MINUTE: "0"
+  };
+  const messages = [];
+  const fetchImpl = (url, options) => {
+    if (String(url).includes("generativelanguage.googleapis.com")) throw new Error("Unexpected Gemini request");
+    messages.push(JSON.parse(options.body));
+    return Promise.resolve(createTextResponse(200, JSON.stringify({ ok: true })));
+  };
+  await runFanout(env, { fetchImpl, logger: createSilentLogger() });
+  messages.length = 0;
+  state.days.today["1.1"].fill(2, 34, 37);
+  await fs.writeFile(stubFile, renderPoeHtml(state));
+  await runFanout(env, { fetchImpl, logger: createSilentLogger() });
+  assert.deepEqual(messages.map(message => message.chat_id), ["first", "second"]);
+  for (const message of messages) assert.match(message.text, /Відключення продовжено/);
+});
+
 test("tomorrow-only changes get a separate tomorrow message", async () => {
   const dir = await createTempDir();
   const file = path.join(dir, "subscriptions.json");
@@ -102,7 +136,7 @@ test("tomorrow-only changes get a separate tomorrow message", async () => {
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
   const env = {
-    TG_BOT_TOKEN: "test-token", GEMINI_API_KEY: "test-gemini", LIGHT_SUBSCRIPTIONS_FILE: file, LIGHT_PIN_TODAY_SCHEDULE: "false", LIGHT_SCHEDULE_IMAGE_ENABLED: "false",
+    TG_BOT_TOKEN: "test-token", GEMINI_API_KEY: "test-gemini", LIGHT_CHANGE_SUMMARY_PROVIDER: "gemini", LIGHT_SUBSCRIPTIONS_FILE: file, LIGHT_PIN_TODAY_SCHEDULE: "false", LIGHT_SCHEDULE_IMAGE_ENABLED: "false",
     LIGHT_TREAT_YELLOW_AS_GREEN: "false",
     LIGHT_CURRENT_MINUTE: "0",
     LIGHT_POE_URL: `${base}/customs/dynamicgpv-info.php`,
@@ -180,7 +214,7 @@ test("fan-out skips Gemini when tomorrow first appears but uses it for a later r
   const state = createDefaultState();
   await fs.writeFile(stubFile, renderPoeHtml(state));
   const env = {
-    TG_BOT_TOKEN: "test-token", GEMINI_API_KEY: "test-gemini", LIGHT_PIN_TODAY_SCHEDULE: "false", LIGHT_SCHEDULE_IMAGE_ENABLED: "false",
+    TG_BOT_TOKEN: "test-token", GEMINI_API_KEY: "test-gemini", LIGHT_CHANGE_SUMMARY_PROVIDER: "gemini", LIGHT_PIN_TODAY_SCHEDULE: "false", LIGHT_SCHEDULE_IMAGE_ENABLED: "false",
     LIGHT_SUBSCRIPTIONS_FILE: subscriptionsFile,
     LIGHT_USE_STUB: "true", LIGHT_STUB_FILE: stubFile,
     LIGHT_STATE_FILE_PATH: path.join(dir, "state.json"),
@@ -313,7 +347,7 @@ test("Gemini rate limit uses raw diff and cools down across retry runs", async (
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
   const env = {
-    TG_BOT_TOKEN: "test-token", GEMINI_API_KEY: "test-gemini", LIGHT_SUBSCRIPTIONS_FILE: file, LIGHT_PIN_TODAY_SCHEDULE: "false", LIGHT_SCHEDULE_IMAGE_ENABLED: "false",
+    TG_BOT_TOKEN: "test-token", GEMINI_API_KEY: "test-gemini", LIGHT_CHANGE_SUMMARY_PROVIDER: "gemini", LIGHT_SUBSCRIPTIONS_FILE: file, LIGHT_PIN_TODAY_SCHEDULE: "false", LIGHT_SCHEDULE_IMAGE_ENABLED: "false",
     LIGHT_CURRENT_MINUTE: "0",
     LIGHT_POE_URL: `${base}/customs/dynamicgpv-info.php`,
     LIGHT_STATE_FILE_PATH: path.join(dir, "state.json"),

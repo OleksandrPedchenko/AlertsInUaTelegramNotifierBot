@@ -5,6 +5,7 @@ const { HttpRequestError } = require("../../lib/httpClient");
 const { loadLightConfig } = require("./config");
 const { changedWindowsForPrompt, describeLightScheduleChange } = require("./geminiClient");
 const { effectiveDay, effectiveSchedule } = require("./effectiveSchedule");
+const { describeLocalScheduleChange } = require("./localSummary");
 const { buildDayLightNotification, buildOutageReminderNotification } = require("./messageCatalog");
 const { parseLightSchedule } = require("./parser");
 const { renderScheduleImage, renderVerticalScheduleImage } = require("./scheduleImage");
@@ -117,9 +118,10 @@ function hasPublishedSchedule(day) {
 function getChangedDays(previousState, currentState) {
   if (!previousState) return [];
   return ["today", "tomorrow"].filter(day =>
-    !(day === "tomorrow" && currentState.noScheduleToday && !hasPublishedSchedule(currentState.tomorrow)) &&
-    dayFingerprint(effectiveDay(previousScheduleForDay(previousState, currentState, day), currentState.treatYellowAsGreen)) !==
-    dayFingerprint(effectiveDay(currentState[day], currentState.treatYellowAsGreen))
+    changedWindowsForPrompt(
+      effectiveDay(previousScheduleForDay(previousState, currentState, day), currentState.treatYellowAsGreen)?.timePeriods || [],
+      effectiveDay(currentState[day], currentState.treatYellowAsGreen)?.timePeriods || []
+    ).length > 0
   );
 }
 
@@ -142,7 +144,7 @@ function findPendingOutageReminder({ currentState, previousState, thresholdMinut
   const sentIds = new Set(getSentOutageReminderIds(previousState));
   const visibleSchedule = effectiveSchedule(currentState, currentState.treatYellowAsGreen);
   const today = visibleSchedule.today.timePeriods;
-  const tomorrow = visibleSchedule.tomorrow?.timePeriods || [];
+  const tomorrow = currentState.tomorrowUnpublished ? [] : visibleSchedule.tomorrow?.timePeriods || [];
   const scheduleDate = currentState.scheduleDate || getLocalDate();
   for (const [day, periods, offset] of [["today", today, 0], ["tomorrow", tomorrow, 1440]]) {
     for (const [index, period] of periods.entries()) {
@@ -201,9 +203,14 @@ function buildCurrentLightState(schedule, config, previousState, response) {
     treatYellowAsGreen: config.job.treatYellowAsGreen,
     currentMinute,
     scheduleDate: getLocalDate(),
+    tomorrowUnpublished: !hasPublishedSchedule(schedule.tomorrow),
     responseStatus: response.getStatus,
     outageReminders: { sentIds: getSentOutageReminderIds(previousState) }
   };
+  if (!hasPublishedSchedule(currentState.tomorrow)) {
+    const previousTomorrow = previousScheduleForDay(previousState, currentState, "tomorrow");
+    if (hasPublishedSchedule(previousTomorrow)) currentState.tomorrow = previousTomorrow;
+  }
   currentState.pendingOutageReminder = findPendingOutageReminder({
     currentState,
     previousState,
@@ -298,7 +305,9 @@ const lightPlugin = {
   },
 
   async buildNotification({ previousState, currentState, changed, config, deps }) {
-    const visibleState = effectiveSchedule(currentState, currentState.treatYellowAsGreen);
+    const effective = effectiveSchedule(currentState, currentState.treatYellowAsGreen);
+    const visibleState = currentState.tomorrowUnpublished
+      ? { ...effective, tomorrow: { timePeriods: [] } } : effective;
     const changedDays = getRelevantChangedDays(previousState, currentState);
     const revisedDays = changedDays.filter(day =>
       hasPublishedSchedule(previousScheduleForDay(previousState, currentState, day))
@@ -328,6 +337,20 @@ const lightPlugin = {
         queue: currentState.queue,
         subQueue: currentState.subQueue
       });
+    } else if (config.job.changeSummaryProvider === "local") {
+      for (const day of geminiDays) {
+        try {
+          summaries[day] = describeLocalScheduleChange(
+            previousScheduleForDay(previousState, currentState, day), currentState[day],
+            day === "today" ? currentState.currentMinute : null,
+            currentState.treatYellowAsGreen
+          );
+        } catch (error) {
+          deps.logger.warn("Local change summary failed; using raw schedule diff only", {
+            queue: currentState.queue, subQueue: currentState.subQueue, day, reason: error.message
+          });
+        }
+      }
     } else if (deps.changeSummaries !== undefined) {
       // A fan-out run already made its single Gemini batch request.
     } else if (!config.gemini.enabled) {
@@ -391,7 +414,8 @@ const lightPlugin = {
     }
 
     if (!previousState || (changedDays.length === 0 && config.job.alwaysSendTgMessage)) {
-      for (const day of ["today", "tomorrow"].filter(day => hasPublishedSchedule(currentState[day]))) {
+      for (const day of ["today", "tomorrow"].filter(day =>
+        hasPublishedSchedule(currentState[day]) && !(day === "tomorrow" && currentState.tomorrowUnpublished))) {
         notifications.push({
           type: `schedule-change:${day}`,
           text: buildDayLightNotification(visibleState, null, day, {

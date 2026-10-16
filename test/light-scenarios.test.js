@@ -13,6 +13,7 @@ const baseEnv = {
   LIGHT_PIN_TODAY_SCHEDULE: "false", LIGHT_SCHEDULE_IMAGE_ENABLED: "false",
   LIGHT_TG_CHAT_ID: "demo-chat",
   LIGHT_TREAT_YELLOW_AS_GREEN: "false",
+  LIGHT_CHANGE_SUMMARY_PROVIDER: "gemini",
   GEMINI_API_KEY: "test-gemini-key"
 };
 
@@ -98,9 +99,17 @@ test("fan-out no-schedule response sends one today revision without a Gemini req
 
 test("Gemini cases require an API key before sending", async () => {
   await assert.rejects(
-    runScenario({ caseName: "schedule-change", env: { TG_BOT_TOKEN: "test", LIGHT_TG_CHAT_ID: "demo" } }),
+    runScenario({ caseName: "schedule-change", env: { TG_BOT_TOKEN: "test", LIGHT_TG_CHAT_ID: "demo", LIGHT_CHANGE_SUMMARY_PROVIDER: "gemini" } }),
     /requires LIGHT_GEMINI_API_KEY or GEMINI_API_KEY/
   );
+});
+
+test("revision scenarios use local summaries without a Gemini key", async () => {
+  const actual = await execute("schedule-change", "12:00", {
+    LIGHT_CHANGE_SUMMARY_PROVIDER: "local", GEMINI_API_KEY: ""
+  });
+  assert.equal(actual.geminiCalls, 0);
+  assert.match(actual.messages[0].text, /Відключення продовжено/);
 });
 
 test("fan-out skips a past-only today revision before Telegram and Gemini", async () => {

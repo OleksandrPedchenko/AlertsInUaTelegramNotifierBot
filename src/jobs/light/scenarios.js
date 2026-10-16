@@ -15,10 +15,10 @@ const scenarioSchedule = require("./scenarioSchedule.json");
 
 const CASES = Object.freeze({
   initial: { time: "12:00", description: "First today and tomorrow schedules as separate notifications", seed: false },
-  "schedule-change": { time: "12:00", description: "Today's outage extends by 30 minutes, with a real Gemini summary", gemini: true },
+  "schedule-change": { time: "12:00", description: "Today's outage extends by 30 minutes, with a change summary", gemini: true },
   "today-shorter": { time: "12:00", description: "Today's outage ends 30 minutes earlier without moving its start", gemini: true },
   "tomorrow-appears": { time: "12:00", description: "Tomorrow schedule first published without a comparison" },
-  "tomorrow-change": { time: "12:00", description: "Tomorrow's outage shortens by 30 minutes, with a real Gemini summary", gemini: true },
+  "tomorrow-change": { time: "12:00", description: "Tomorrow's outage shortens by 30 minutes, with a change summary", gemini: true },
   "double-change": { time: "12:00", description: "Two tomorrow outages change: one shortens and one extends", gemini: true },
   "no-schedule-today": { time: "12:00", description: "POE returns an explicit no-schedule notice instead of today's table" },
   "off-reminder": { time: "20:50", description: "Queue 5.1 light off at its fixed 21:00 start" },
@@ -102,7 +102,8 @@ async function runScenario({ caseName, time, queue, subQueue, leadMinutes = 10, 
   const selectedQueue = parseChoice(queue ?? scenario.queue ?? 5, "queue", 1, 6);
   const selectedSubQueue = parseChoice(subQueue ?? scenario.subQueue ?? 1, "subqueue", 1, 2);
   const selectedLead = parseChoice(leadMinutes, "lead", 1, 1440);
-  if (scenario.gemini && !(env.LIGHT_GEMINI_API_KEY || env.GEMINI_API_KEY)) {
+  if (scenario.gemini && env.LIGHT_CHANGE_SUMMARY_PROVIDER === "gemini" &&
+      !(env.LIGHT_GEMINI_API_KEY || env.GEMINI_API_KEY)) {
     throw new Error(`${caseName} requires LIGHT_GEMINI_API_KEY or GEMINI_API_KEY`);
   }
 
@@ -115,8 +116,9 @@ async function runScenario({ caseName, time, queue, subQueue, leadMinutes = 10, 
   }
   const keys = subscriptions
     ? [...new Set(subscriptions.map(({ queue, subQueue }) => `${queue}.${subQueue}`))] : [key];
-  const enableGemini = scenario.gemini || (caseName === "tomorrow-appears" &&
-    Boolean(env.LIGHT_GEMINI_API_KEY || env.GEMINI_API_KEY));
+  const enableGemini = env.LIGHT_CHANGE_SUMMARY_PROVIDER === "gemini" &&
+    (scenario.gemini || (caseName === "tomorrow-appears" &&
+      Boolean(env.LIGHT_GEMINI_API_KEY || env.GEMINI_API_KEY)));
   const { current, previous } = makeStates(caseName, keys);
   const server = createMockServer(current);
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "light-scenario-"));
