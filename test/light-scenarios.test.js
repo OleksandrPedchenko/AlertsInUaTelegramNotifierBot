@@ -142,6 +142,32 @@ test("fan-out Gemini input keeps one prior cell and only relevant change windows
   assert.deepEqual(item.changes, [{ startMin: 960, endMin: 990, oldState: 1, newState: 2 }]);
 });
 
+test("fan-out renders double-escaped Gemini JSON line breaks in Telegram", async () => {
+  const dir = await createTempDir();
+  const subscriptionsFile = path.join(dir, "subscriptions.json");
+  await fs.writeFile(subscriptionsFile, JSON.stringify({ queues: {
+    "5.1": { enabled: true, chatIds: ["demo-chat"] }
+  } }));
+  let message;
+  await runScenario({ caseName: "double-change", env: { ...baseEnv, LIGHT_SUBSCRIPTIONS_FILE: subscriptionsFile },
+    fetchImpl: async (url, options) => {
+      if (String(url).includes("generativelanguage.googleapis.com")) {
+        const summary = String.raw`🟢 Перше відключення скорочено\n🔴 Друге відключення продовжено`;
+        return createTextResponse(200, JSON.stringify({ candidates: [{ content: { parts: [{
+          text: JSON.stringify({ "5.1:tomorrow": summary })
+        }] } }] }));
+      }
+      if (String(url).includes("api.telegram.org")) {
+        message = JSON.parse(options.body).text;
+        return createTextResponse(200, JSON.stringify({ ok: true }));
+      }
+      return fetch(url, options);
+    }
+  });
+  assert.match(message, /🟢 Перше відключення скорочено\n🔴 Друге відключення продовжено/);
+  assert.doesNotMatch(message, /\\n/);
+});
+
 test("scenario fixture keeps fixed six-hour outage starts and a half-hour return period", () => {
   for (const [day, queues] of Object.entries(scenarioSchedule.days)) {
     for (const [queue, cells] of Object.entries(queues)) {

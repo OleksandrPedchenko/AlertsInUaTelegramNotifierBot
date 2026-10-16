@@ -9,6 +9,10 @@ function escapeHtml(value) {
     .replace(/>/g, "&gt;");
 }
 
+function formatChangeSummary(summary) {
+  return escapeHtml(String(summary).replace(/\\r\\n|\\n|\\r/g, "\n"));
+}
+
 function formatPeriod(period) {
   const emoji = { 1: "🟢", 2: "🔴", 3: "🟡" }[period.status || period.state] || "⚪";
   return `${emoji} ${escapeHtml(String(period.time).replace(" - ", "–"))} · ${escapeHtml(
@@ -80,7 +84,7 @@ function buildLightNotification(currentState, previousState = null, options = {}
 
   if (previousState) {
     if (options.changeSummary) {
-      lines.push("", escapeHtml(options.changeSummary));
+      lines.push("", formatChangeSummary(options.changeSummary));
     }
 
     const details = [
@@ -108,7 +112,7 @@ function buildDayLightNotification(currentState, previousDay, day, options = {})
     `<b>${previousDay ? "🔄 Змінився графік" : options.currentSchedule ? "⚡ Актуальний графік" : "📅 З’явився графік"} на ${dayLabel.toLowerCase()} · черга ${escapeHtml(currentState.queue)}.${escapeHtml(currentState.subQueue)}</b>`
   ];
   if (options.changeSummary) {
-    lines.push("", escapeHtml(options.changeSummary));
+    lines.push("", formatChangeSummary(options.changeSummary));
   }
   const details = [];
   if (previousDay) {

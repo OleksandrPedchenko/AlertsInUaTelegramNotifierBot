@@ -62,6 +62,17 @@ test("revisions keep the summary visible and always quote the full old and new d
   assert.ok(withSummary.indexOf("Відключення змінилось.") < withSummary.indexOf("<blockquote expandable>"));
 });
 
+test("revision summaries render Gemini's literal newline escapes as separate lines", () => {
+  const summary = String.raw`🔴 Перша зміна\n🟢 Друга зміна`;
+  for (const message of [
+    buildDayLightNotification(state, day, "today", { changeSummary: summary }),
+    buildLightNotification(state, state, { changeSummary: summary })
+  ]) {
+    assert.match(message, /🔴 Перша зміна\n🟢 Друга зміна/);
+    assert.doesNotMatch(message, /\\n/);
+  }
+});
+
 test("reminders lead with colored action and quote the full schedule", () => {
   for (const [kind, tentative, headline] of [
     ["off", false, /🔴 Відключення через 10 хв/],
