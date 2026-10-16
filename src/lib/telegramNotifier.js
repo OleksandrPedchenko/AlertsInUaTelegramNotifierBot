@@ -16,6 +16,41 @@ function isRetriableStatus(status) {
   return status === 408 || status === 429 || (status >= 500 && status <= 599);
 }
 
+async function sendTelegramPhoto(png, caption, config, options = {}) {
+  const body = new FormData();
+  body.set("chat_id", config.chatId);
+  body.set("caption", caption);
+  body.set("parse_mode", config.parseMode || "HTML");
+  body.set("photo", new Blob([png], { type: "image/png" }), "schedule.png");
+
+  let response;
+  try {
+    response = await requestWithRetry({
+      method: "POST",
+      url: `https://api.telegram.org/bot${config.botToken}/sendPhoto`,
+      headers: { Accept: "application/json", "User-Agent": config.userAgent || "alerts-tg-bot/1.0" },
+      body,
+      timeoutMs: config.timeoutMs,
+      maxRetries: config.maxRetries,
+      retryBaseDelayMs: config.retryBaseDelayMs,
+      responseType: "json",
+      fetchImpl: options.fetchImpl,
+      logger: options.logger
+    });
+  } catch (error) {
+    throw new NotificationError(error.message, {
+      cause: error, status: error.status, body: error.body, retriable: error.retriable
+    });
+  }
+  if (response.body?.ok !== true) {
+    throw new NotificationError("Telegram API returned an unsuccessful response body", {
+      status: response.status, body: response.body,
+      retriable: isRetriableStatus(response.body?.error_code)
+    });
+  }
+  return response.body.result;
+}
+
 async function sendTelegramMessage(text, config, options = {}) {
   const url = `https://api.telegram.org/bot${config.botToken}/sendMessage`;
 
@@ -59,6 +94,26 @@ async function sendTelegramMessage(text, config, options = {}) {
       retriable: isRetriableStatus(errorCode)
     });
   }
+  return response.body.result;
+}
+
+function telegramCaptionLength(text) {
+  return text
+    .replace(/<[^>]*>/g, "")
+    .replace(/&(?:amp|lt|gt|quot|apos);/g, " ").length;
+}
+
+async function sendTelegramNotification(notification, config, options = {}) {
+  const captionLength = telegramCaptionLength(notification.text);
+  if (notification.photo && captionLength <= 1024) {
+    const message = await sendTelegramPhoto(notification.photo, notification.text, config, options);
+    await options.onSent?.(message, "photo");
+  } else {
+    if (notification.photo) options.logger?.warn?.("Schedule caption exceeds Telegram limit; sending full text", { captionLength });
+    const message = await sendTelegramMessage(notification.text, config, options);
+    await options.onSent?.(message, "text");
+  }
+  return 1;
 }
 
 class TelegramNotifier {
@@ -75,5 +130,8 @@ class TelegramNotifier {
 module.exports = {
   NotificationError,
   TelegramNotifier,
-  sendTelegramMessage
+  sendTelegramMessage,
+  sendTelegramPhoto,
+  sendTelegramNotification,
+  telegramCaptionLength
 };

@@ -48,6 +48,35 @@ function normalizePeriodForPrompt(period) {
   };
 }
 
+function trimPeriodsForPrompt(periods, currentMinute) {
+  const normalized = periods.map(normalizePeriodForPrompt);
+  if (!Number.isInteger(currentMinute)) return normalized;
+  const cutoff = Math.max(0, Math.floor(currentMinute / 30) * 30 - 30);
+  return normalized.filter(period => period.endMin > cutoff);
+}
+
+function changedWindowsForPrompt(previousPeriods, currentPeriods, currentMinute) {
+  const old = previousPeriods.map(normalizePeriodForPrompt);
+  const now = currentPeriods.map(normalizePeriodForPrompt);
+  const stateAt = (periods, minute) => periods.find(period =>
+    period.startMin <= minute && minute < period.endMin)?.state;
+  const windows = [];
+  for (let startMin = 0; startMin < 1440; startMin += 30) {
+    const endMin = startMin + 30;
+    if (Number.isInteger(currentMinute) && endMin <= currentMinute) continue;
+    const oldState = stateAt(old, startMin);
+    const newState = stateAt(now, startMin);
+    if (oldState === newState) continue;
+    const last = windows.at(-1);
+    if (last && last.endMin === startMin && last.oldState === oldState && last.newState === newState) {
+      last.endMin = endMin;
+    } else {
+      windows.push({ startMin, endMin, oldState, newState });
+    }
+  }
+  return windows;
+}
+
 function normalizeSegmentsForGemini(state, day = "today") {
   const periods = state?.[day]?.timePeriods;
   if (!Array.isArray(periods)) {
@@ -70,14 +99,16 @@ function hasScheduleChanged(previousState, currentState, day) {
   );
 }
 
-function selectScheduleForGemini(previousState, currentState) {
-  if (hasScheduleChanged(previousState, currentState, "today")) {
+function selectScheduleForGemini(previousState, currentState, preferredDay) {
+  if (preferredDay === "today" || (!preferredDay && hasScheduleChanged(previousState, currentState, "today"))) {
+    const oldSchedule = trimPeriodsForPrompt(previousState?.today?.timePeriods || [], currentState.currentMinute);
+    const newSchedule = trimPeriodsForPrompt(currentState.today.timePeriods, currentState.currentMinute);
     return {
       day: "today",
-      oldSchedule: normalizeSegmentsForGemini(previousState, "today"),
-      newSchedule: normalizeSegmentsForGemini(currentState, "today"),
-      oldOutages: normalizeOutagesForGemini(previousState, "today"),
-      newOutages: normalizeOutagesForGemini(currentState, "today"),
+      oldSchedule,
+      newSchedule,
+      oldOutages: oldSchedule.filter(period => period.state === 2).map(({ startMin, endMin }) => ({ startMin, endMin })),
+      newOutages: newSchedule.filter(period => period.state === 2).map(({ startMin, endMin }) => ({ startMin, endMin })),
       currentMinute: currentState.currentMinute
     };
   }
@@ -96,8 +127,11 @@ function formatCurrentMinute(currentMinute) {
   return Number.isInteger(currentMinute) ? String(currentMinute) : "не переданий";
 }
 
-function buildGeminiPrompt(previousState, currentState) {
-  const selected = selectScheduleForGemini(previousState, currentState);
+function buildGeminiPrompt(previousState, currentState, day) {
+  const selected = selectScheduleForGemini(previousState, currentState, day);
+  const treatYellowAsGreen = currentState.treatYellowAsGreen === true;
+  const changes = changedWindowsForPrompt(previousState?.[selected.day]?.timePeriods || [],
+    currentState[selected.day].timePeriods, selected.currentMinute);
 
   return [
     "Ти аналізуєш зміни у графіку відключень електроенергії.",
@@ -120,15 +154,21 @@ function buildGeminiPrompt(previousState, currentState) {
     "}",
     "",
     "Пояснення станів:",
-    "- state = 1 — світло є",
+    treatYellowAsGreen ? "- state = 1 — світло є, включно з жовтим періодом POE" : "- state = 1 — світло є",
     "- state = 2 — світла нема",
-    "- state = 3 — перемикання / перехідний період, коли світло зазвичай зʼявляється",
+    treatYellowAsGreen
+      ? "- Жовтий період POE у цьому режимі вважається часом зі світлом, тому state=3 у даних нижче немає."
+      : "- state = 3 — перемикання / перехідний період, коли світло зазвичай зʼявляється",
     "",
-    "Ключове правило про state=3:",
-    "- state=3 завжди є технічним 30-хвилинним періодом перемикання після відключення.",
-    "- Не показуй state=3 як окрему зміну у відповіді.",
-    "- Не формулюй зміни як 'було перемикання, стало...' або 'стало перемикання'.",
-    "- Якщо різниця зачіпає state=3, пояснюй її тільки через те, що період відключення state=2 збільшився або зменшився.",
+    ...(treatYellowAsGreen ? [
+      "Жовтий період POE врахований як зелений. Не описуй його окремо від часу зі світлом."
+    ] : [
+      "Ключове правило про state=3:",
+      "- state=3 завжди є технічним 30-хвилинним періодом перемикання після відключення.",
+      "- Не показуй state=3 як окрему зміну у відповіді.",
+      "- Не формулюй зміни як 'було перемикання, стало...' або 'стало перемикання'.",
+      "- Якщо різниця зачіпає state=3, пояснюй її тільки через те, що період відключення state=2 збільшився або зменшився."
+    ]),
     "- Для висновку орієнтуйся насамперед на OLD_OUTAGES і NEW_OUTAGES.",
     "",
     "Пояснення часу:",
@@ -140,27 +180,29 @@ function buildGeminiPrompt(previousState, currentState) {
     "- доба поділена на 48 слотів по 30 хвилин",
     "",
     "Твоє завдання:",
-    "1. Порівняти OLD_OUTAGES і NEW_OUTAGES як основне джерело правди про зміни.",
-    "2. Використовувати OLD_SCHEDULE і NEW_SCHEDULE тільки як додатковий контекст.",
-    "3. Знайти всі проміжки часу, де змінився саме період без світла state=2.",
+    "1. Описати лише проміжки з RELEVANT_CHANGES, передані нижче.",
+    "2. OLD_OUTAGES і NEW_OUTAGES містять повні початки та завершення відповідних відключень.",
+    "3. Використовувати OLD_SCHEDULE і NEW_SCHEDULE тільки як додатковий контекст, не шукати в них інших змін.",
     "4. Обʼєднати сусідні 30-хвилинні проміжки, якщо там однакова зміна: відключення додалось або відключення прибралось.",
     "5. Якщо CURRENT_MINUTE переданий — ігнорувати зміни, які повністю закінчилися до CURRENT_MINUTE.",
-    "6. Якщо зміна частково перетинається з CURRENT_MINUTE — показати тільки частину від CURRENT_MINUTE до кінця зміни.",
-    "7. Пояснити зміни українською мовою у зручному для людини форматі.",
-    "8. Не показувати JSON, індекси або технічні деталі.",
-    '9. Якщо релевантних змін немає — відповісти: "Актуальних змін у графіку не знайдено."',
+    "6. Для актуальної зміни покажи повний новий і старий проміжки відключення та різницю тривалості; не обрізай їх до CURRENT_MINUTE.",
+    "7. Для сьогодні передані лише сегменти від попереднього 30-хвилинного слота; сегмент, що перетинає цю межу, зберігає повний початок.",
+    "8. Пояснити зміни українською мовою у зручному для людини форматі.",
+    "9. Не показувати JSON, індекси або технічні деталі.",
+    '10. Якщо релевантних змін немає — відповісти: "Актуальних змін у графіку не знайдено."',
     "",
     "Формат відповіді:",
     "",
-    "Оновлення графіка:",
-    "- З HH:MM до HH:MM ...",
+    "Один короткий рядок на кожне змінене відключення.",
     "",
     "Приклади формулювань:",
     "",
-    'Відключення додалось: "З HH:MM до HH:MM раніше було світло, тепер його не буде."',
-    'Відключення прибралось: "З HH:MM до HH:MM раніше мало не бути світла, тепер світло буде."',
-    'Відключення стало довшим: "Відключення збільшилось: з HH:MM до HH:MM тепер світла не буде."',
-    'Відключення стало коротшим: "Відключення зменшилось: з HH:MM до HH:MM тепер світло буде."',
+    'Відключення додалось: "🔴 З HH:MM до HH:MM раніше було світло, тепер його не буде."',
+    'Відключення прибралось: "🟢 З HH:MM до HH:MM раніше мало не бути світла, тепер світло буде."',
+    'Відключення стало довшим: "🔴 Відключення продовжено: 06:00–08:00 (було 06:00–07:30) — на 30 хв довше."',
+    treatYellowAsGreen
+      ? 'Відключення стало коротшим: "🟢 Відключення скорочено: 16:00–16:30 (було 16:00–17:00) — на 30 хв коротше."'
+      : 'Відключення стало коротшим: "🟡 Відключення скорочено: 16:00–16:30 (було 16:00–17:00) — на 30 хв коротше. Світло може з’явитися раніше."',
     "",
     "Важливі правила:",
     "- Не вигадуй змін, яких немає.",
@@ -169,7 +211,9 @@ function buildGeminiPrompt(previousState, currentState) {
     "- Не згадуй період перемикання у відповіді.",
     "- Не використовуй слово 'перемикання' у відповіді.",
     "- Не описуй зміни state=3 напряму.",
-    '- Не використовуй слова "можливо", "ймовірно", "схоже", якщо зміна прямо видно з даних.',
+    ...(treatYellowAsGreen ? [
+      '- Не використовуй слова "можливо", "ймовірно", "схоже" для часу, який у цьому режимі вважається часом зі світлом.'
+    ] : []),
     '- "24:00" залишай як "24:00".',
     "- Відповідь має бути короткою і тільки про зміни.",
     "- Якщо змін багато, згрупуй їх максимально компактно, але без втрати змісту.",
@@ -189,6 +233,9 @@ function buildGeminiPrompt(previousState, currentState) {
     "NEW_OUTAGES:",
     JSON.stringify(selected.newOutages),
     "",
+    "RELEVANT_CHANGES:",
+    JSON.stringify(changes),
+    "",
     "CURRENT_MINUTE:",
     formatCurrentMinute(selected.currentMinute)
   ].join("\n");
@@ -207,7 +254,7 @@ function extractGeminiText(responseBody) {
     .trim();
 }
 
-async function describeLightScheduleChange(config, previousState, currentState, deps) {
+async function describeLightScheduleChange(config, previousState, currentState, deps, day) {
   const response = await deps.requestWithRetry({
     method: "POST",
     url: buildGeminiUrl(config),
@@ -220,7 +267,7 @@ async function describeLightScheduleChange(config, previousState, currentState, 
       contents: [
         {
           role: "user",
-          parts: [{ text: buildGeminiPrompt(previousState, currentState) }]
+          parts: [{ text: buildGeminiPrompt(previousState, currentState, day) }]
         }
       ],
       generationConfig: {
@@ -245,6 +292,8 @@ module.exports = {
   describeLightScheduleChange,
   extractGeminiText,
   normalizePeriodForPrompt,
+  changedWindowsForPrompt,
+  trimPeriodsForPrompt,
   normalizeOutagesForGemini,
   parsePeriodMinutes,
   normalizeSegmentsForGemini

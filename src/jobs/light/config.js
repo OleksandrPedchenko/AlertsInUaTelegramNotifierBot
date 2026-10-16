@@ -3,19 +3,11 @@
 const { ConfigError } = require("../../lib/config");
 
 const DEFAULT_POE_URL = "https://www.poe.pl.ua/customs/dynamicgpv-info.php";
-const DEFAULT_POE_POST_URL = "https://www.poe.pl.ua/customs/search-disconnection.php";
 const DEFAULT_GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
 const DEFAULT_GEMINI_MODEL = "models/gemini-flash-lite-latest";
 const DEFAULT_LOKI_IP = "192.168.0.41";
 const DEFAULT_LOKI_PORT = 3100;
 const DEFAULT_LOKI_TIMEOUT_MS = 2000;
-const DEFAULT_POST_BODY = Object.freeze({
-  varn: 0,
-  filial: "8",
-  city_name: "с.Зайченці",
-  street_name: "вул.Польова (Гагаріна)",
-  building_num: "18"
-});
 
 function readNumberFromKeys(readers, keys, fallback, validation) {
   for (const key of keys) {
@@ -71,26 +63,6 @@ function readPoeUrl(readers, key, fallback) {
   return parsed.toString();
 }
 
-function readPostBody(readers) {
-  const rawJson = readers.readOptionalString("LIGHT_POST_BODY_JSON");
-  if (!rawJson) {
-    return DEFAULT_POST_BODY;
-  }
-
-  let parsed;
-  try {
-    parsed = JSON.parse(rawJson);
-  } catch {
-    throw new ConfigError("LIGHT_POST_BODY_JSON must be valid JSON");
-  }
-
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new ConfigError("LIGHT_POST_BODY_JSON must be a JSON object");
-  }
-
-  return parsed;
-}
-
 function readGeminiConfig(readers) {
   const apiKey = readOptionalStringFromKeys(readers, ["LIGHT_GEMINI_API_KEY", "GEMINI_API_KEY"]);
   const enabled =
@@ -127,10 +99,16 @@ function readGeminiConfig(readers) {
       min: 0,
       max: 2
     }),
-    maxOutputTokens: readers.readNumber("LIGHT_GEMINI_MAX_OUTPUT_TOKENS", 512, {
+    maxOutputTokens: readers.readNumber("LIGHT_GEMINI_MAX_OUTPUT_TOKENS", 1024, {
       integer: true,
       min: 32,
       max: 4096
+    }),
+    minIntervalMinutes: readers.readNumber("LIGHT_GEMINI_MIN_INTERVAL_MINUTES", 5, {
+      integer: true, min: 0, max: 1440
+    }),
+    maxDailyRequests: readers.readNumber("LIGHT_GEMINI_MAX_DAILY_REQUESTS", 20, {
+      integer: true, min: 0, max: 10000
     })
   };
 }
@@ -155,6 +133,12 @@ function readLokiConfig(readers) {
 }
 
 function loadLightConfig(_env, readers) {
+  const scheduleImageLayout = readers.readOptionalString("LIGHT_SCHEDULE_IMAGE_LAYOUT", "horizontal");
+  if (!["horizontal", "vertical"].includes(scheduleImageLayout)) {
+    throw new Error("LIGHT_SCHEDULE_IMAGE_LAYOUT must be horizontal or vertical");
+  }
+  const subscriptionsFilePath = readers.readOptionalString("LIGHT_SUBSCRIPTIONS_FILE")
+    ? readers.readResolvedPath("LIGHT_SUBSCRIPTIONS_FILE") : null;
   const useStub = readers.readBoolean("LIGHT_USE_STUB", false);
   const currentMinute =
     readers.env.LIGHT_CURRENT_MINUTE === undefined || readers.env.LIGHT_CURRENT_MINUTE === ""
@@ -178,8 +162,6 @@ function loadLightConfig(_env, readers) {
   return {
     poe: {
       url: readPoeUrl(readers, "LIGHT_POE_URL", DEFAULT_POE_URL),
-      postUrl: readPoeUrl(readers, "LIGHT_POE_POST_URL", DEFAULT_POE_POST_URL),
-      postBody: readPostBody(readers),
       queue,
       subQueue,
       timeoutMs: readNumberFromKeys(readers, ["LIGHT_HTTP_TIMEOUT_MS", "HTTP_TIMEOUT_MS"], 10000, {
@@ -204,7 +186,8 @@ function loadLightConfig(_env, readers) {
     },
     telegram: {
       botToken: readers.readRequiredString("TG_BOT_TOKEN"),
-      chatId: readRequiredStringFromKeys(readers, ["LIGHT_TG_CHAT_ID", "TG_CHAT_ID"]),
+      chatId: subscriptionsFilePath ? readOptionalStringFromKeys(readers, ["LIGHT_TG_CHAT_ID", "TG_CHAT_ID"])
+        : readRequiredStringFromKeys(readers, ["LIGHT_TG_CHAT_ID", "TG_CHAT_ID"]),
       timeoutMs: readNumberFromKeys(
         readers,
         ["LIGHT_TG_HTTP_TIMEOUT_MS", "TG_HTTP_TIMEOUT_MS"],
@@ -236,10 +219,15 @@ function loadLightConfig(_env, readers) {
       )
     },
     job: {
+      subscriptionsFilePath,
       lockFilePath: readers.readResolvedPath("LIGHT_LOCK_FILE_PATH", ".light-job.lock"),
       stateFilePath: readers.readResolvedPath("LIGHT_STATE_FILE_PATH", ".light-last-state.json"),
       stubFilePath: readers.readResolvedPath("LIGHT_STUB_FILE", "light-example.html"),
       useStub,
+      treatYellowAsGreen: readers.readBoolean("LIGHT_TREAT_YELLOW_AS_GREEN", true),
+      scheduleImageEnabled: readers.readBoolean("LIGHT_SCHEDULE_IMAGE_ENABLED", true),
+      pinTodaySchedule: readers.readBoolean("LIGHT_PIN_TODAY_SCHEDULE", true),
+      scheduleImageLayout,
       alwaysSendTgMessage: readers.readBoolean("LIGHT_ALWAYS_SEND_TG_MESSAGE", false),
       outageReminderBeforeMinutes: readers.readNumber("LIGHT_OUTAGE_REMINDER_BEFORE_MINUTES", 0, {
         integer: true,
@@ -258,9 +246,7 @@ function loadLightConfig(_env, readers) {
 }
 
 module.exports = {
-  DEFAULT_POE_POST_URL,
   DEFAULT_POE_URL,
   DEFAULT_GEMINI_MODEL,
-  DEFAULT_POST_BODY,
   loadLightConfig
 };
