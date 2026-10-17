@@ -37,7 +37,7 @@ function validateSettings(value, label) {
   return settings;
 }
 
-function collectSubscriptions(data) {
+function collectSubscriptions(data, { requireEnabled = true } = {}) {
   const seen = new Set();
   const all = [];
   function add(queue, subQueue, value, label, enabled = true) {
@@ -84,7 +84,9 @@ function collectSubscriptions(data) {
   } else {
     throw new Error("Light subscriptions JSON needs a queues object or non-empty subscriptions array");
   }
-  if (!all.some(item => item.enabled)) throw new Error("Light subscriptions have no enabled destinations");
+  if (requireEnabled && !all.some(item => item.enabled)) {
+    throw new Error("Light subscriptions have no enabled destinations");
+  }
   return all;
 }
 
@@ -93,8 +95,8 @@ function parseSubscriptions(data) {
     .map(({ enabled, ...subscription }) => subscription);
 }
 
-function normalizeSubscriptions(data) {
-  const all = collectSubscriptions(data);
+function normalizeSubscriptions(data, options) {
+  const all = collectSubscriptions(data, options);
   const queues = {};
   for (let queue = 1; queue <= 6; queue += 1) {
     for (let subQueue = 1; subQueue <= 2; subQueue += 1) {

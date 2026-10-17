@@ -63,3 +63,26 @@ test("editor saves valid changes and rejects cross-origin and stale edits", asyn
     await new Promise(resolve => server.close(resolve));
   }
 });
+
+test("editor opens an all-disabled template so the first chat can be enabled", async () => {
+  const dir = await createTempDir();
+  const file = path.join(dir, "subscriptions.json");
+  await fs.writeFile(file, JSON.stringify({ queues: { "6.1": { enabled: false, chatIds: [] } } }));
+  const server = createEditorServer({ filePath: file, host: "127.0.0.1", defaults: {} });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const loaded = await (await fetch(`${base}/api/subscriptions`)).json();
+    assert.equal(loaded.document.queues["6.1"].enabled, false);
+    loaded.document.queues["6.1"].enabled = true;
+    loaded.document.queues["6.1"].chats.push({ chatId: "first", settings: {} });
+    const saved = await fetch(`${base}/api/subscriptions`, {
+      method: "PUT", headers: { "Content-Type": "application/json", Origin: base },
+      body: JSON.stringify({ document: loaded.document, hash: loaded.hash })
+    });
+    assert.equal(saved.status, 200);
+    assert.equal((await readSubscriptionDocument(file)).normalized.queues["6.1"].chats[0].chatId, "first");
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
+});

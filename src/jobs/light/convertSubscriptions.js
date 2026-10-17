@@ -2,7 +2,6 @@
 
 const path = require("node:path");
 const { readSubscriptionDocument, saveSubscriptionDocument } = require("./subscriptionFile");
-const { parseSubscriptions } = require("./subscriptions");
 
 function parseArgs(args) {
   const options = { write: false };
@@ -19,9 +18,10 @@ async function main(args = process.argv.slice(2)) {
   const options = parseArgs(args);
   const filePath = path.resolve(options.file || process.env.LIGHT_SUBSCRIPTIONS_FILE || "light-subscriptions.json");
   const document = await readSubscriptionDocument(filePath);
-  const count = parseSubscriptions(document.normalized).length;
+  const count = Object.values(document.normalized.queues)
+    .reduce((total, entry) => total + (entry.enabled ? entry.chats.length : 0), 0);
   if (options.write) {
-    await saveSubscriptionDocument(filePath, document.normalized, document.hash);
+    await saveSubscriptionDocument(filePath, document.normalized, document.hash, { requireEnabled: false });
     console.log(`Converted ${count} enabled destinations in ${filePath}; backup: ${filePath}.bak`);
   } else {
     console.log(JSON.stringify(document.normalized, null, 2));

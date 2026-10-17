@@ -12,11 +12,11 @@ function fileHash(text) {
 async function readSubscriptionDocument(filePath) {
   const text = await fs.readFile(filePath, "utf8");
   const data = JSON.parse(text);
-  return { data, normalized: normalizeSubscriptions(data), hash: fileHash(text) };
+  return { data, normalized: normalizeSubscriptions(data, { requireEnabled: false }), hash: fileHash(text) };
 }
 
-async function saveSubscriptionDocument(filePath, data, expectedHash) {
-  const normalized = normalizeSubscriptions(data);
+async function saveSubscriptionDocument(filePath, data, expectedHash, options) {
+  const normalized = normalizeSubscriptions(data, options);
   const current = await fs.readFile(filePath, "utf8");
   if (expectedHash && fileHash(current) !== expectedHash) {
     const error = new Error("Subscription file changed since it was loaded");
