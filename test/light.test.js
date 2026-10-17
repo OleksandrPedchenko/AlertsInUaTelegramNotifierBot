@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("fs/promises");
 const path = require("path");
 const test = require("node:test");
+const { JSDOM } = require("jsdom");
 
 const { createEnvReader } = require("../src/lib/config");
 const { runPluginJob } = require("../src/lib/runner");
@@ -35,14 +36,14 @@ function createPoeHtml(selectedToday = [1, 1, 2, 3], selectedTomorrow = [2, 2, 1
             ${row(selectedToday)}
           </tbody>
         </table>
-        <table>
+        ${selectedTomorrow === null ? "" : `<table>
           <tbody>
             ${row([1])}
             ${row([2])}
             ${row([3])}
             ${row(selectedTomorrow)}
           </tbody>
-        </table>
+        </table>`}
       </body>
     </html>
   `;
@@ -117,11 +118,47 @@ test("light image layout defaults to horizontal and accepts vertical", async () 
 test("light config defaults Gemini to flash lite latest model", async () => {
   const dir = await createTempDir();
   const config = buildLightConfig(dir, {
-    GEMINI_API_KEY: "gemini-key"
+    GEMINI_API_KEY: "gemini-key", LIGHT_CHANGE_SUMMARY_PROVIDER: "gemini"
   });
 
   assert.equal(config.gemini.enabled, true);
   assert.equal(config.gemini.model, "models/gemini-flash-lite-latest");
+});
+
+test("local summaries are the default even when a Gemini key exists", async () => {
+  const dir = await createTempDir();
+  const config = buildLightConfig(dir, { GEMINI_API_KEY: "unused-key" });
+  assert.equal(config.job.changeSummaryProvider, "local");
+  assert.equal(config.gemini.enabled, false);
+  assert.throws(() => buildLightConfig(dir, { LIGHT_CHANGE_SUMMARY_PROVIDER: "other" }),
+    /LIGHT_CHANGE_SUMMARY_PROVIDER/);
+});
+
+test("single-queue local summary sends a revision without a Gemini request", async () => {
+  const dir = await createTempDir();
+  const oldSchedule = createDefaultState();
+  oldSchedule.days.today["2.2"] = Array(48).fill(1);
+  oldSchedule.days.today["2.2"].fill(2, 34, 36);
+  const oldHtml = renderPoeHtml(oldSchedule);
+  oldSchedule.days.today["2.2"].fill(2, 34, 37);
+  const newHtml = renderPoeHtml(oldSchedule);
+  const config = buildLightConfig(dir, { GEMINI_API_KEY: "unused-key", LIGHT_CURRENT_MINUTE: "0" });
+  await writeJobState(config.job.stateFilePath, lightPlugin.getStateKey(config),
+    parseLightSchedule(oldHtml, 2, 2), lightPlugin.getStateFingerprint(parseLightSchedule(oldHtml, 2, 2)));
+  const messages = [];
+  await runPluginJob(lightPlugin, {}, { config, logger: createSilentLogger(),
+    fetchImpl: async (url, options) => {
+      if (String(url).includes("generativelanguage.googleapis.com")) throw new Error("Unexpected Gemini request");
+      if (String(url).includes("api.telegram.org")) {
+        messages.push(JSON.parse(options.body).text);
+        return createTextResponse(200, JSON.stringify({ ok: true }));
+      }
+      return createTextResponse(200, newHtml);
+    }
+  });
+  assert.equal(messages.length, 1);
+  assert.match(messages[0], /Відключення продовжено/);
+  assert.match(messages[0], /Було[^]*Тепер/);
 });
 
 test("single-queue Gemini prompt follows green treatment of yellow", () => {
@@ -324,6 +361,15 @@ test("light reminders include tomorrow's midnight transition", () => {
   assert.equal(reminder.id, "2026-10-07:on:0-60");
 });
 
+test("an unpublished tomorrow does not trigger a reminder from retained comparison state", () => {
+  const currentState = {
+    scheduleDate: "2026-10-06", currentMinute: 1435, tomorrowUnpublished: true,
+    today: { timePeriods: [{ state: 1, startMin: 0, endMin: 1440 }] },
+    tomorrow: { timePeriods: [{ state: 2, startMin: 0, endMin: 60 }] }
+  };
+  assert.equal(findPendingOutageReminder({ currentState, previousState: null, thresholdMinutes: 10 }), null);
+});
+
 test("day comparison follows calendar dates across midnight", () => {
   const allOn = { timePeriods: [{ status: 1, time: "00:00 - 24:00", durationMinutes: 1440 }] };
   const off = { timePeriods: [{ status: 2, time: "00:00 - 24:00", durationMinutes: 1440 }] };
@@ -331,6 +377,44 @@ test("day comparison follows calendar dates across midnight", () => {
   const current = { scheduleDate: "2026-10-07", today: allOn, tomorrow: off };
   assert.deepEqual(getChangedDays(previous, current), ["tomorrow"]);
   assert.equal(previousScheduleForDay(previous, current, "tomorrow"), null);
+});
+
+test("equivalent period order does not trigger a schedule revision", () => {
+  const today = { timePeriods: [
+    { state: 1, startMin: 0, endMin: 60 }, { state: 2, startMin: 60, endMin: 90 }
+  ] };
+  const previous = { today, tomorrow: { timePeriods: [] } };
+  const current = { today: { timePeriods: [...today.timePeriods].reverse() },
+    tomorrow: { timePeriods: [] }, currentMinute: 0 };
+  assert.deepEqual(getChangedDays(previous, current), []);
+});
+
+test("an unpublished tomorrow keeps its same-date baseline for a later revision", async () => {
+  const dir = await createTempDir();
+  const config = buildLightConfig(dir, { LIGHT_CURRENT_MINUTE: "0" });
+  const schedule = createDefaultState();
+  schedule.days.today["2.2"] = Array(48).fill(1);
+  schedule.days.tomorrow["2.2"] = Array(48).fill(1);
+  schedule.days.tomorrow["2.2"].fill(2, 34, 36);
+  const oldHtml = renderPoeHtml(schedule);
+  const missingDocument = new JSDOM(oldHtml);
+  missingDocument.window.document.querySelectorAll("table")[1].remove();
+  const missingHtml = missingDocument.serialize();
+  schedule.days.tomorrow["2.2"].fill(2, 34, 37);
+  const revisedHtml = renderPoeHtml(schedule);
+  const messages = [];
+  const run = html => runPluginJob(lightPlugin, {}, { config, logger: createSilentLogger(),
+    fetchImpl: createLightFetch(html, body => messages.push(body.text)) });
+  await run(oldHtml);
+  messages.length = 0;
+  await run(missingHtml);
+  assert.deepEqual(messages, []);
+  const stored = await readJobState(config.job.stateFilePath, lightPlugin.getStateKey(config));
+  assert.equal(stored.state.tomorrow.timePeriods.length > 0, true);
+  await run(revisedHtml);
+  assert.equal(messages.length, 1);
+  assert.match(messages[0], /Відключення продовжено/);
+  assert.match(messages[0], /Було[^]*Тепер/);
 });
 
 test("today ignores past-only cells but keeps the current cell and all of tomorrow", () => {
@@ -574,14 +658,7 @@ test("light runner sends Telegram notification when selected queue schedule chan
   assert.match(telegramBody.text, /Тепер/);
   assert.doesNotMatch(telegramBody.text, /Завтра/);
   assert.match(telegramBody.text, /<blockquote expandable>/);
-  assert.deepEqual(
-    logger.entries.find((entry) => entry.message === "Gemini change summary skipped")?.meta,
-    {
-      reason: "disabled",
-      queue: 2,
-      subQueue: 2
-    }
-  );
+  assert.equal(logger.entries.some((entry) => entry.message === "Requesting Gemini change summary"), false);
 });
 
 test("light runner retries an unsent schedule change on the next run", async () => {
@@ -690,6 +767,7 @@ test("light runner asks Gemini to explain changed segments when configured", asy
   const newHtml = createPoeHtml([2, 2, 1, 1]);
   const config = buildLightConfig(dir, {
     LIGHT_GEMINI_API_KEY: "gemini-key",
+    LIGHT_CHANGE_SUMMARY_PROVIDER: "gemini",
     LIGHT_TREAT_YELLOW_AS_GREEN: "false",
     LIGHT_CURRENT_MINUTE: "0",
     LIGHT_GEMINI_RETRY_BASE_DELAY_MS: "100"
@@ -785,7 +863,7 @@ test("light runner asks Gemini to explain changed segments when configured", asy
 
 test("first publication of tomorrow sends its schedule without a Gemini comparison", async () => {
   const dir = await createTempDir();
-  const config = buildLightConfig(dir, { LIGHT_GEMINI_API_KEY: "gemini-key" });
+  const config = buildLightConfig(dir, { LIGHT_GEMINI_API_KEY: "gemini-key", LIGHT_CHANGE_SUMMARY_PROVIDER: "gemini" });
   const previousState = {
     ...parseLightSchedule(createPoeHtml([1, 1, 2, 3], []), 2, 2),
     sourceUrl: config.poe.url

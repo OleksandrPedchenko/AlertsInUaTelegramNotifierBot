@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Light subscriptions</title>
+  <style>
+    :root { color-scheme: light; font: 15px/1.45 system-ui, sans-serif; background: #f4f6f9; color: #152334; }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    header { background: #14283f; color: white; padding: 1.3rem max(1rem, calc((100vw - 1100px)/2)); }
+    header h1 { margin: 0 0 .2rem; font-size: 1.5rem; }
+    header p { margin: 0; color: #d7e5f3; }
+    main { max-width: 1100px; margin: auto; padding: 1rem; }
+    .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: .7rem; margin: .3rem 0 1rem; }
+    .toolbar p { margin: 0; flex: 1; min-width: 240px; }
+    button { background: #1261a0; color: white; border: 0; border-radius: 7px; padding: .55rem .9rem; font: inherit; cursor: pointer; }
+    button:hover { background: #0d4f84; }
+    button.secondary { background: #e3eaf2; color: #1b3b5b; }
+    button.danger { background: #a83333; }
+    button:disabled { opacity: .55; cursor: wait; }
+    #status { min-height: 1.4rem; font-weight: 600; }
+    #status.error, .error { color: #a02020; }
+    #status.success { color: #187343; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 490px), 1fr)); gap: 1rem; }
+    .queue { background: white; border: 1px solid #d8e0e9; border-radius: 10px; padding: 1rem; box-shadow: 0 2px 10px #1834560a; }
+    .queue h2 { margin: 0; font-size: 1.15rem; }
+    .queue-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+    .queue-head label { white-space: nowrap; }
+    .queue .error { margin: .5rem 0; min-height: 1rem; }
+    .chat { border: 1px solid #dce3eb; border-radius: 8px; padding: .8rem; margin: .7rem 0; }
+    .chat-head { display: flex; align-items: end; gap: .5rem; }
+    .chat-head label { flex: 1; }
+    label { display: block; font-weight: 600; }
+    input[type=text], input[type=number], select { display: block; width: 100%; border: 1px solid #aebccd; border-radius: 5px; padding: .45rem; font: inherit; background: white; color: #152334; }
+    input[type=checkbox] { width: 1rem; height: 1rem; vertical-align: middle; }
+    details { margin-top: .7rem; }
+    summary { cursor: pointer; color: #1261a0; font-weight: 600; }
+    .settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: .7rem; padding-top: .7rem; }
+    .settings label { font-size: .88rem; }
+    .setting-number { display: flex; gap: .4rem; }
+    .setting-number select { width: 44%; }
+    .hint { color: #53677d; font-size: .9rem; }
+  </style>
+</head>
+<body>
+  <header><h1>Light subscriptions</h1><p>Manage Telegram chats and notification preferences by queue.</p></header>
+  <main>
+    <div class="toolbar">
+      <p class="hint">Changes take effect on the next scheduled bot run. A new subscription receives its first schedule then.</p>
+      <button type="button" id="reload" class="secondary">Reload file</button>
+      <button type="button" id="save">Save subscriptions</button>
+    </div>
+    <p id="status" role="status" aria-live="polite"></p>
+    <div id="queues" class="grid"></div>
+  </main>
+  <script>
+    "use strict";
+    const labels = {
+      changeSummaryProvider: "Change summary", treatYellowAsGreen: "Yellow periods as light on",
+      scheduleImageEnabled: "Schedule image", pinTodaySchedule: "Pin today's schedule",
+      scheduleImageLayout: "Image layout", alwaysSendTgMessage: "Always send",
+      outageReminderBeforeMinutes: "Reminder lead (minutes)"
+    };
+    let documentData, fileHash, defaults, fields;
+    const root = document.getElementById("queues");
+    const status = document.getElementById("status");
+    const saveButton = document.getElementById("save");
+
+    function setStatus(message, kind = "") {
+      status.textContent = message;
+      status.className = kind;
+    }
+
+    function element(tag, className, text) {
+      const node = document.createElement(tag);
+      if (className) node.className = className;
+      if (text !== undefined) node.textContent = text;
+      return node;
+    }
+
+    function settingControl(key, settings) {
+      const field = fields[key];
+      const wrap = element("label");
+      wrap.append(labels[key]);
+      const select = element("select");
+      const inherited = element("option", "", `Inherit (${String(defaults[key])})`);
+      inherited.value = "inherit";
+      select.append(inherited);
+      if (field.type === "integer") {
+        const custom = element("option", "", "Custom");
+        custom.value = "custom";
+        select.append(custom);
+        const number = element("input");
+        number.type = "number";
+        number.min = field.min;
+        number.max = field.max;
+        number.value = settings[key] ?? defaults[key];
+        number.disabled = !Object.hasOwn(settings, key);
+        select.value = number.disabled ? "inherit" : "custom";
+        select.addEventListener("change", () => {
+          number.disabled = select.value === "inherit";
+          if (number.disabled) delete settings[key];
+          else settings[key] = Number(number.value);
+        });
+        number.addEventListener("input", () => { settings[key] = Number(number.value); });
+        const row = element("span", "setting-number");
+        row.append(select, number);
+        wrap.append(row);
+      } else {
+        const values = field.type === "boolean" ? [true, false] : field.values;
+        for (const value of values) {
+          const option = element("option", "", String(value));
+          option.value = String(value);
+          select.append(option);
+        }
+        select.value = Object.hasOwn(settings, key) ? String(settings[key]) : "inherit";
+        select.addEventListener("change", () => {
+          if (select.value === "inherit") delete settings[key];
+          else settings[key] = field.type === "boolean" ? select.value === "true" : select.value;
+        });
+        wrap.append(select);
+      }
+      return wrap;
+    }
+
+    function renderChat(entry, chat, chatIndex) {
+      const card = element("div", "chat");
+      const head = element("div", "chat-head");
+      const label = element("label", "", "Telegram chat ID");
+      const input = element("input");
+      input.type = "text";
+      input.value = chat.chatId;
+      input.autocomplete = "off";
+      input.addEventListener("input", () => { chat.chatId = input.value; });
+      label.append(input);
+      const remove = element("button", "danger", "Remove");
+      remove.type = "button";
+      remove.setAttribute("aria-label", `Remove chat ${chatIndex + 1}`);
+      remove.addEventListener("click", () => {
+        entry.chats.splice(chatIndex, 1);
+        render();
+      });
+      head.append(label, remove);
+      card.append(head);
+      const details = element("details");
+      details.append(element("summary", "", "Notification settings"));
+      const settings = element("div", "settings");
+      chat.settings ||= {};
+      for (const key of Object.keys(fields)) settings.append(settingControl(key, chat.settings));
+      details.append(settings);
+      card.append(details);
+      return card;
+    }
+
+    function render() {
+      root.replaceChildren();
+      for (const [queueKey, entry] of Object.entries(documentData.queues)) {
+        const card = element("section", "queue");
+        card.dataset.queue = queueKey;
+        const head = element("div", "queue-head");
+        head.append(element("h2", "", `Queue ${queueKey}`));
+        const enabledLabel = element("label", "", "Enabled ");
+        const enabled = element("input");
+        enabled.type = "checkbox";
+        enabled.checked = entry.enabled;
+        enabled.addEventListener("change", () => { entry.enabled = enabled.checked; });
+        enabledLabel.append(enabled);
+        head.append(enabledLabel);
+        card.append(head);
+        const error = element("p", "error");
+        card.append(error);
+        for (const [index, chat] of entry.chats.entries()) card.append(renderChat(entry, chat, index));
+        const add = element("button", "secondary", "Add chat");
+        add.type = "button";
+        add.addEventListener("click", () => { entry.chats.push({ chatId: "", settings: {} }); render(); });
+        card.append(add);
+        root.append(card);
+      }
+    }
+
+    async function load() {
+      setStatus("Loading…");
+      const response = await fetch("/api/subscriptions", { cache: "no-store" });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error);
+      documentData = payload.document;
+      fileHash = payload.hash;
+      defaults = payload.defaults;
+      fields = payload.fields;
+      render();
+      setStatus("Loaded. Edit and save when ready.");
+    }
+
+    async function save() {
+      saveButton.disabled = true;
+      setStatus("Saving…");
+      for (const card of root.querySelectorAll(".queue .error")) card.textContent = "";
+      try {
+        const response = await fetch("/api/subscriptions", {
+          method: "PUT", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ document: documentData, hash: fileHash })
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error || "Save failed");
+        documentData = payload.document;
+        fileHash = payload.hash;
+        render();
+        setStatus("Saved. The next scheduled bot run will use this file.", "success");
+      } catch (error) {
+        setStatus(error.message, "error");
+        const match = /Queue ([1-6]\.[12])/.exec(error.message);
+        if (match) {
+          const card = [...root.querySelectorAll(".queue")].find(item => item.dataset.queue === match[1]);
+          if (card) card.querySelector(".error").textContent = error.message;
+        }
+      } finally { saveButton.disabled = false; }
+    }
+
+    document.getElementById("reload").addEventListener("click", () => load().catch(error => setStatus(error.message, "error")));
+    saveButton.addEventListener("click", save);
+    load().catch(error => setStatus(error.message, "error"));
+  </script>
+</body>
+</html>
