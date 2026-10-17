@@ -63,14 +63,15 @@ function readPoeUrl(readers, key, fallback) {
   return parsed.toString();
 }
 
-function readGeminiConfig(readers, provider) {
+function readGeminiConfig(readers, provider, subscriptionsFilePath) {
   const apiKey = readOptionalStringFromKeys(readers, ["LIGHT_GEMINI_API_KEY", "GEMINI_API_KEY"]);
-  const enabled = provider === "gemini" && (
+  const allowed = (
     readers.env.LIGHT_GEMINI_ENABLED === undefined || readers.env.LIGHT_GEMINI_ENABLED === ""
       ? true
       : readers.readBoolean("LIGHT_GEMINI_ENABLED", false));
+  const enabled = provider === "gemini" && allowed;
 
-  if (enabled && !apiKey) {
+  if (enabled && !apiKey && !subscriptionsFilePath) {
     throw new ConfigError(
       "Missing required environment variable: LIGHT_GEMINI_API_KEY or GEMINI_API_KEY"
     );
@@ -78,6 +79,7 @@ function readGeminiConfig(readers, provider) {
 
   return {
     enabled,
+    allowed,
     apiKey,
     apiBaseUrl: readers.readOptionalString("LIGHT_GEMINI_API_BASE_URL", DEFAULT_GEMINI_API_BASE_URL),
     model: readers.readOptionalString("LIGHT_GEMINI_MODEL", DEFAULT_GEMINI_MODEL),
@@ -241,7 +243,7 @@ function loadLightConfig(_env, readers) {
       }),
       currentMinute
     },
-    gemini: readGeminiConfig(readers, changeSummaryProvider),
+    gemini: readGeminiConfig(readers, changeSummaryProvider, subscriptionsFilePath),
     log: {
       logFilePath: readers.readOptionalString("LOG_FILE_PATH", "alerts.log"),
       retentionDays: readers.readNumber("LOG_RETENTION_DAYS", 7, { integer: true, min: 0 }),

@@ -110,7 +110,42 @@ The image renderer uses `sharp`; run `npm ci` after updating the VM. Install a f
 
 ### Multiple queues and Telegram groups
 
-Copy `light-subscriptions.example.json` to `light-subscriptions.json` and set `LIGHT_SUBSCRIPTIONS_FILE=light-subscriptions.json` in `.env` or the light systemd service. The example lists all 12 queue and subqueue keys, disabled by default. Set `enabled` to `true` and put one or more Telegram chat IDs in `chatIds` for each queue you want to track. You may remove unused keys; at least one enabled queue with a chat ID is required. Duplicate chat IDs within one queue are rejected. The old `subscriptions` array remains accepted during migration. Keep `TG_BOT_TOKEN` in `.env`, not the JSON file. The local `light-subscriptions.json` file is ignored by Git.
+Copy `light-subscriptions.example.json` to `light-subscriptions.json` and set `LIGHT_SUBSCRIPTIONS_FILE=light-subscriptions.json` in `.env` or the light systemd service. The example lists all 12 queue and subqueue keys, disabled by default. Set `enabled` to `true` and add chats to `chats` for each queue you want to track. You may remove unused keys; at least one enabled queue with a chat is required. Duplicate chat IDs within one queue are rejected. Keep `TG_BOT_TOKEN` and any Gemini API key in `.env`, not the JSON file. The local `light-subscriptions.json` file is ignored by Git.
+
+Each chat can override notification behavior independently, even when two chats follow the same queue or one chat follows several queues. Omitted settings inherit the matching `LIGHT_*` values from `.env`:
+
+```json
+{
+  "queues": {
+    "6.1": {
+      "enabled": true,
+      "chats": [
+        { "chatId": "CHAT_A", "settings": { "changeSummaryProvider": "local", "outageReminderBeforeMinutes": 10 } },
+        { "chatId": "CHAT_B", "settings": { "changeSummaryProvider": "gemini", "scheduleImageEnabled": false } }
+      ]
+    }
+  }
+}
+```
+
+Allowed settings are `changeSummaryProvider` (`local` or `gemini`), `treatYellowAsGreen`, `scheduleImageEnabled`, `pinTodaySchedule`, `scheduleImageLayout` (`horizontal` or `vertical`), `alwaysSendTgMessage`, and `outageReminderBeforeMinutes` (`0..1440`). The four on/off settings take JSON booleans. Unknown keys and invalid values fail before the POE request. The old `chatIds` arrays and top-level `subscriptions` array still work; a queue entry cannot contain both `chats` and `chatIds`. The POE request, bot token, retry settings, state file, lock, and Gemini request budget remain shared.
+
+To convert an existing file, first preview the result, then write it with a backup:
+
+```sh
+npm run light:subscriptions:convert -- --file light-subscriptions.json
+npm run light:subscriptions:convert -- --file light-subscriptions.json --write
+```
+
+The write command saves the original as `light-subscriptions.json.bak`. Run it against the file used by your scheduled bot only when that bot runs this updated code; older code does not read `chats`.
+
+To edit subscriptions in a browser, start the editor when needed:
+
+```sh
+npm run light:subscriptions:web
+```
+
+It reads `LIGHT_SUBSCRIPTIONS_FILE` from `.env` and uses port 3020. If the machine has several private network addresses, pass `--host YOUR_LAN_IP`; `--file` and `--port` are also supported. Open the printed URL from another device on your network, then stop the editor with Ctrl+C. There is no access code: anyone who can reach this address can edit the file while the editor is running. Save makes a `.bak` copy and checks for changes made outside the page. Saving does not send messages; new destinations receive their first schedule on the next normal bot run.
 
 `npm run start:light` remains the systemd command. With the subscriptions file configured, each run fetches the POE schedule once, evaluates each unique queue, and sends Telegram messages to the corresponding chats. Delivery state is saved per queue and chat. If one chat fails, other successful deliveries stay recorded, and only the failed chat retries on the next run. The first run in multi-group mode sends an initial schedule to every configured chat; the old single-queue state is not reused.
 

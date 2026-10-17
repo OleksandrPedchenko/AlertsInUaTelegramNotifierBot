@@ -102,21 +102,22 @@ async function runScenario({ caseName, time, queue, subQueue, leadMinutes = 10, 
   const selectedQueue = parseChoice(queue ?? scenario.queue ?? 5, "queue", 1, 6);
   const selectedSubQueue = parseChoice(subQueue ?? scenario.subQueue ?? 1, "subqueue", 1, 2);
   const selectedLead = parseChoice(leadMinutes, "lead", 1, 1440);
-  if (scenario.gemini && env.LIGHT_CHANGE_SUMMARY_PROVIDER === "gemini" &&
-      !(env.LIGHT_GEMINI_API_KEY || env.GEMINI_API_KEY)) {
-    throw new Error(`${caseName} requires LIGHT_GEMINI_API_KEY or GEMINI_API_KEY`);
-  }
-
   const key = `${selectedQueue}.${selectedSubQueue}`;
   const subscriptionsFile = env.LIGHT_SUBSCRIPTIONS_FILE
     ? path.resolve(env.LIGHT_SUBSCRIPTIONS_FILE) : null;
   const subscriptions = subscriptionsFile ? await loadSubscriptions(subscriptionsFile) : null;
+  const hasGeminiDestination = subscriptions
+    ? subscriptions.some(item => (item.settings.changeSummaryProvider ?? env.LIGHT_CHANGE_SUMMARY_PROVIDER) === "gemini")
+    : env.LIGHT_CHANGE_SUMMARY_PROVIDER === "gemini";
+  if (scenario.gemini && hasGeminiDestination && !(env.LIGHT_GEMINI_API_KEY || env.GEMINI_API_KEY)) {
+    throw new Error(`${caseName} requires LIGHT_GEMINI_API_KEY or GEMINI_API_KEY`);
+  }
   if (subscriptions && (queue !== undefined || subQueue !== undefined)) {
     throw new Error("--queue and --subqueue apply only when LIGHT_SUBSCRIPTIONS_FILE is unset");
   }
   const keys = subscriptions
     ? [...new Set(subscriptions.map(({ queue, subQueue }) => `${queue}.${subQueue}`))] : [key];
-  const enableGemini = env.LIGHT_CHANGE_SUMMARY_PROVIDER === "gemini" &&
+  const enableGemini = hasGeminiDestination &&
     (scenario.gemini || (caseName === "tomorrow-appears" &&
       Boolean(env.LIGHT_GEMINI_API_KEY || env.GEMINI_API_KEY)));
   const { current, previous } = makeStates(caseName, keys);
