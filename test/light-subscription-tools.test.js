@@ -3,12 +3,49 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const path = require("node:path");
+const { spawnSync } = require("node:child_process");
 const test = require("node:test");
 const { createTempDir } = require("./helpers");
 const { readSubscriptionDocument, saveSubscriptionDocument } = require("../src/jobs/light/subscriptionFile");
 const { createEditorServer } = require("../src/jobs/light/subscriptionEditor");
 
 const legacy = { queues: { "6.1": { enabled: true, chatIds: ["chat-a"] } } };
+
+test("reverse converter previews old chatIds without changing the file", async () => {
+  const dir = await createTempDir();
+  const file = path.join(dir, "subscriptions.json");
+  const modern = { queues: { "6.1": { enabled: true, chats: [
+    { chatId: "chat-a", settings: { scheduleImageLayout: "vertical" } }
+  ] } } };
+  await fs.writeFile(file, JSON.stringify(modern));
+  const result = spawnSync(process.execPath,
+    [path.join(__dirname, "../src/jobs/light/revertSubscriptions.js"), "--file", file],
+    { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout).queues["6.1"],
+    { enabled: true, chatIds: ["chat-a"] });
+  assert.deepEqual(JSON.parse(await fs.readFile(file, "utf8")), modern);
+});
+
+test("reverse converter writes old format and keeps a full new-format backup", async () => {
+  const dir = await createTempDir();
+  const file = path.join(dir, "subscriptions.json");
+  const modern = { queues: {
+    "5.1": { enabled: false, chats: [{ chatId: "paused", settings: { pinTodaySchedule: false } }] },
+    "6.1": { enabled: true, chats: [{ chatId: "active", settings: { changeSummaryProvider: "local" } }] }
+  } };
+  await fs.writeFile(file, JSON.stringify(modern));
+  const result = spawnSync(process.execPath,
+    [path.join(__dirname, "../src/jobs/light/revertSubscriptions.js"), "--file", file, "--write"],
+    { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  const backup = result.stdout.match(/backup: (.+)\n/)?.[1];
+  assert.ok(backup);
+  assert.deepEqual(JSON.parse(await fs.readFile(backup, "utf8")), modern);
+  const reverted = JSON.parse(await fs.readFile(file, "utf8"));
+  assert.deepEqual(reverted.queues["5.1"], { enabled: false, chatIds: ["paused"] });
+  assert.deepEqual(reverted.queues["6.1"], { enabled: true, chatIds: ["active"] });
+});
 
 test("conversion is idempotent, creates backup, and refuses stale writes", async () => {
   const dir = await createTempDir();

@@ -9,6 +9,7 @@
     "start:light": "node src/jobs/light/index.js",
     "start:light:mock": "node src/jobs/light/mockServer.js",
     "light:subscriptions:convert": "node src/jobs/light/convertSubscriptions.js",
+    "light:subscriptions:revert": "node src/jobs/light/revertSubscriptions.js",
     "light:subscriptions:web": "node src/jobs/light/subscriptionEditor.js",
     "test:light:live": "node src/jobs/light/scenarios.js",
     "test:light:poe": "node src/jobs/light/realPoe.js",

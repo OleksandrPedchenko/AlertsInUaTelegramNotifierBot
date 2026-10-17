@@ -139,6 +139,16 @@ npm run light:subscriptions:convert -- --file light-subscriptions.json --write
 
 The write command saves the original as `light-subscriptions.json.bak`. Run it against the file used by your scheduled bot only when that bot runs this updated code; older code does not read `chats`.
 
+To return to `main`, stop the light job and editor, then preview and write the old `chatIds` format before switching branches:
+
+```sh
+npm run light:subscriptions:revert -- --file light-subscriptions.json
+npm run light:subscriptions:revert -- --file light-subscriptions.json --write
+git switch main
+```
+
+The reverse command saves a uniquely named full new-format backup beside the file. `main` cannot use per-chat settings; configure any needed notification defaults in `.env` before restarting the light job.
+
 To edit subscriptions in a browser, start the editor when needed:
 
 ```sh
