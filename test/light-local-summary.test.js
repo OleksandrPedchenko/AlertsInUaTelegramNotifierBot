@@ -24,17 +24,38 @@ function schedule(outages, yellow = []) {
 test("local summary reports full intervals for a current outage extension", () => {
   const old = schedule([[900, 960]]);
   const now = schedule([[900, 990]]);
-  assert.match(describeLocalScheduleChange(old, now, 970, true),
-    /🔴 Відключення продовжено: 15:00–16:30 \(було 15:00–16:00\) — на 30 хв довше/);
+  assert.equal(describeLocalScheduleChange(old, now, 970, true),
+    "🔴 Відключення продовжено на 30 хвилин: 15:00–16:30 (було 15:00–16:00).");
   assert.equal(describeLocalScheduleChange(old, now, 990, true), "");
+});
+
+test("local summary inflects whole-hour durations", () => {
+  const old = schedule([[0, 30]]);
+  for (const [minutes, duration] of [
+    [60, "1 годину"], [120, "2 години"], [300, "5 годин"],
+    [660, "11 годин"], [1260, "21 годину"]
+  ]) {
+    const now = schedule([[0, 30 + minutes]]);
+    assert.match(describeLocalScheduleChange(old, now, null, true),
+      new RegExp(`Відключення продовжено на ${duration}:`));
+  }
 });
 
 test("local summary handles shortened outage and tentative return", () => {
   const old = schedule([[960, 1020]]);
   const now = schedule([[960, 990]], [[990, 1020]]);
-  assert.match(describeLocalScheduleChange(old, now, null, false),
-    /🟡 Відключення скорочено: 16:00–16:30 \(було 16:00–17:00\) — на 30 хв коротше\. Світло може з’явитися раніше/);
-  assert.match(describeLocalScheduleChange(old, now, null, true), /🟢 Відключення скорочено/);
+  assert.equal(describeLocalScheduleChange(old, now, null, false),
+    "🟡 Відключення скорочено на 30 хвилин: 16:00–16:30 (було 16:00–17:00). Світло може з’явитися раніше.");
+  assert.equal(describeLocalScheduleChange(old, now, null, true),
+    "🟢 Відключення скорочено на 30 хвилин: 16:00–16:30 (було 16:00–17:00).");
+});
+
+test("local summary distinguishes confirmed and tentative cancellation", () => {
+  const old = schedule([[960, 1020]]);
+  assert.equal(describeLocalScheduleChange(old, schedule([]), null, false),
+    "🟢 Скасовано відключення: 16:00–17:00.");
+  assert.equal(describeLocalScheduleChange(old, schedule([], [[960, 1020]]), null, false),
+    "🟡 Відключення 16:00–17:00 прибрано з графіка. Світло може з’явитися раніше.");
 });
 
 test("local summary reports additions, removals and multiple outages chronologically", () => {
@@ -57,7 +78,7 @@ test("local summary describes shifted outages without claiming an extension", ()
   const old = schedule([[600, 660]]);
   const now = schedule([[630, 690]]);
   const summary = describeLocalScheduleChange(old, now, null, true);
-  assert.match(summary, /10:30–11:30 \(було 10:00–11:00\)/);
+  assert.equal(summary, "🔄 Час відключення змінено: 10:30–11:30 (було 10:00–11:00).");
   assert.doesNotMatch(summary, /продовжено|скорочено/);
 });
 
@@ -72,7 +93,7 @@ test("local summary describes a split without inventing a simple shortening", ()
   const old = schedule([[600, 720]]);
   const now = schedule([[600, 630], [660, 720]]);
   const summary = describeLocalScheduleChange(old, now, null, true);
-  assert.match(summary, /було 10:00–12:00; тепер 10:00–10:30, 11:00–12:00/);
+  assert.equal(summary, "🔄 Графік відключень змінено: було 10:00–12:00; тепер 10:00–10:30, 11:00–12:00.");
   assert.doesNotMatch(summary, /скорочено/);
 });
 

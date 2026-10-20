@@ -42,7 +42,13 @@ function formatInterval({ startMin, endMin }) {
 }
 
 function formatDuration(minutes) {
-  return minutes % 60 === 0 ? `${minutes / 60} год` : `${minutes} хв`;
+  if (minutes % 60 !== 0) return `${minutes} хвилин`;
+  const hours = minutes / 60;
+  const lastTwo = hours % 100;
+  const form = lastTwo >= 11 && lastTwo <= 14 ? "годин" :
+    hours % 10 === 1 ? "годину" :
+    [2, 3, 4].includes(hours % 10) ? "години" : "годин";
+  return `${hours} ${form}`;
 }
 
 function describeLocalScheduleChange(previousDay, currentDay, currentMinute, treatYellowAsGreen) {
@@ -85,8 +91,9 @@ function describeLocalScheduleChange(previousDay, currentDay, currentMinute, tre
     } else if (!now.length) {
       const tentative = old.some(interval => Array.from({ length: (interval.endMin - interval.startMin) / 30 },
         (_, offset) => newSlots[interval.startMin / 30 + offset]).includes(3));
-      text = `${tentative ? "🟡" : "🟢"} Відключення скасовано: ${formatInterval(old[0])}.`;
-      if (tentative) text += " Світло може з’явитися раніше.";
+      text = tentative
+        ? `🟡 Відключення ${formatInterval(old[0])} прибрано з графіка. Світло може з’явитися раніше.`
+        : `🟢 Скасовано відключення: ${formatInterval(old[0])}.`;
     } else if (old.length === 1 && now.length === 1) {
       const before = old[0];
       const after = now[0];
@@ -94,17 +101,17 @@ function describeLocalScheduleChange(previousDay, currentDay, currentMinute, tre
       const newLength = after.endMin - after.startMin;
       const aligned = before.startMin === after.startMin || before.endMin === after.endMin;
       if (aligned && newLength > oldLength) {
-        text = `🔴 Відключення продовжено: ${formatInterval(after)} (було ${formatInterval(before)}) — на ${formatDuration(newLength - oldLength)} довше.`;
+        text = `🔴 Відключення продовжено на ${formatDuration(newLength - oldLength)}: ${formatInterval(after)} (було ${formatInterval(before)}).`;
       } else if (aligned && newLength < oldLength) {
         const tentative = Array.from({ length: (end - start) / 30 }, (_, offset) => start / 30 + offset)
           .some(slot => oldSlots[slot] === 2 && newSlots[slot] === 3);
-        text = `${tentative ? "🟡" : "🟢"} Відключення скорочено: ${formatInterval(after)} (було ${formatInterval(before)}) — на ${formatDuration(oldLength - newLength)} коротше.`;
+        text = `${tentative ? "🟡" : "🟢"} Відключення скорочено на ${formatDuration(oldLength - newLength)}: ${formatInterval(after)} (було ${formatInterval(before)}).`;
         if (tentative) text += " Світло може з’явитися раніше.";
       } else {
-        text = `🔄 Відключення змінено: ${formatInterval(after)} (було ${formatInterval(before)}).`;
+        text = `🔄 Час відключення змінено: ${formatInterval(after)} (було ${formatInterval(before)}).`;
       }
     } else {
-      text = `🔄 Відключення змінено: було ${old.map(formatInterval).join(", ") || "немає"}; тепер ${now.map(formatInterval).join(", ") || "немає"}.`;
+      text = `🔄 Графік відключень змінено: було ${old.map(formatInterval).join(", ") || "немає"}; тепер ${now.map(formatInterval).join(", ") || "немає"}.`;
     }
     lines.push({ start, text });
   }
