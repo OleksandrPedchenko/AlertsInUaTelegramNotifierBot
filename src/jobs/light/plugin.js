@@ -83,11 +83,12 @@ function dateFromCurrentMinute(currentMinute) {
 
 function getSentOutageReminderIds(previousState) {
   const sentIds = previousState?.outageReminders?.sentIds;
-  return Array.isArray(sentIds) ? sentIds.filter((id) => typeof id === "string") : [];
+  return Array.isArray(sentIds) ? sentIds.filter((id) => typeof id === "string")
+    .map((id) => id.replace(/-\d+$/, "")) : [];
 }
 
 function buildOutageReminderId(outage, date = getLocalDate()) {
-  return `${date}:${outage.kind || "off"}:${outage.startMin}-${outage.endMin}`;
+  return `${date}:${outage.kind || "off"}:${outage.startMin}`;
 }
 
 function followingDate(date) {
