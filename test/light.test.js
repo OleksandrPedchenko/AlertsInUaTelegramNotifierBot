@@ -307,6 +307,28 @@ test("light parser preserves xbar row offset and segment grouping", () => {
   assert.equal(schedule.today.totalTimeOff, 30);
 });
 
+test("light parser reads the new POE horizontal grid and ignores its vertical duplicate", async () => {
+  const html = await fs.readFile(path.join(__dirname, "fixtures/poe-new-layout.html"), "utf8");
+  const schedule = parseLightSchedule(html, 1, 1, { now: new Date("2026-10-27T10:15:00") });
+
+  assert.deepEqual(schedule.today.timePeriods.map(({ status, startMin, endMin }) =>
+    ({ status, startMin, endMin })), [
+    { status: 1, startMin: 0, endMin: 480 },
+    { status: 2, startMin: 480, endMin: 570 },
+    { status: 3, startMin: 570, endMin: 600 },
+    { status: 1, startMin: 600, endMin: 840 },
+    { status: 2, startMin: 840, endMin: 930 },
+    { status: 3, startMin: 930, endMin: 960 },
+    { status: 1, startMin: 960, endMin: 1200 },
+    { status: 2, startMin: 1200, endMin: 1290 },
+    { status: 3, startMin: 1290, endMin: 1320 },
+    { status: 1, startMin: 1320, endMin: 1440 }
+  ]);
+  assert.equal(schedule.today.totalTimeOff, 270);
+  assert.deepEqual(schedule.tomorrow.timePeriods, []);
+  assert.equal(schedule.updatedAt, "Оновлено: 27 жовтня 2026 09:35");
+});
+
 test("light parser rejects HTML without the selected schedule row", () => {
   assert.throws(
     () => parseLightSchedule("<html><body>Service unavailable</body></html>", 2, 2),

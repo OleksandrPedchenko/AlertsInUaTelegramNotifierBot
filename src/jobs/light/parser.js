@@ -29,7 +29,8 @@ class PoeResponse {
   }
 
   getTable(index = 0) {
-    return this.dom.window.document.querySelectorAll("tbody")[index] || null;
+    return Array.from(this.dom.window.document.querySelectorAll("tbody"))
+      .filter((body) => !body.closest("table.gpv-vtable"))[index] || null;
   }
 
   get updatedAt() {
@@ -54,11 +55,12 @@ class Parser {
   }
 
   get segments() {
+    const labelCells = this.table?.closest("table.gpv-table") ? 1 : (this.subQueue === 1 ? 2 : 1);
     const array = Array.from(this.elements)
-      .slice(this.subQueue === 1 ? 2 : 1)
+      .slice(labelCells)
       .map((element) =>
         Number(
-          [...element.classList].map((className) => className.match(/^light_(\d+)$/)).find(Boolean)?.[1]
+          [...element.classList].map((className) => className.match(/^(?:light_|gpv-s)([123])$/)).find(Boolean)?.[1]
         )
       );
     const result = [];
@@ -165,7 +167,7 @@ function parseLightSchedule(html, queue, subQueue, options = {}) {
   const tomorrowParser = new Parser(response.tomorrowTable, queue, subQueue, options);
 
   const hasSchedule = Array.from(todayParser.elements).some((cell) =>
-    [...cell.classList].some((name) => /^light_[123]$/.test(name))
+    [...cell.classList].some((name) => /^(?:light_|gpv-s)[123]$/.test(name))
   );
   if (!hasSchedule) {
     if (hasExplicitNoScheduleNotice(response)) {
