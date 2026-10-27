@@ -242,7 +242,7 @@ test("schedule revision keeps the Gemini summary and full periods in its photo c
   await runScenario({
     caseName: "today-shorter",
     env: {
-      TG_BOT_TOKEN: "token", TG_CHAT_ID: "chat", GEMINI_API_KEY: "gemini-key",
+      TG_BOT_TOKEN: "token", TG_CHAT_ID: "chat", GEMINI_API_KEY: "gemini-key", LIGHT_CHANGE_SUMMARY_PROVIDER: "gemini",
       LIGHT_PIN_TODAY_SCHEDULE: "false", LIGHT_SCHEDULE_IMAGE_ENABLED: "true"
     },
     fetchImpl: async (url, options) => {

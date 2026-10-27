@@ -13,6 +13,7 @@ const baseEnv = {
   LIGHT_PIN_TODAY_SCHEDULE: "false", LIGHT_SCHEDULE_IMAGE_ENABLED: "false",
   LIGHT_TG_CHAT_ID: "demo-chat",
   LIGHT_TREAT_YELLOW_AS_GREEN: "false",
+  LIGHT_CHANGE_SUMMARY_PROVIDER: "gemini",
   GEMINI_API_KEY: "test-gemini-key"
 };
 
@@ -98,9 +99,56 @@ test("fan-out no-schedule response sends one today revision without a Gemini req
 
 test("Gemini cases require an API key before sending", async () => {
   await assert.rejects(
-    runScenario({ caseName: "schedule-change", env: { TG_BOT_TOKEN: "test", LIGHT_TG_CHAT_ID: "demo" } }),
+    runScenario({ caseName: "schedule-change", env: { TG_BOT_TOKEN: "test", LIGHT_TG_CHAT_ID: "demo", LIGHT_CHANGE_SUMMARY_PROVIDER: "gemini" } }),
     /requires LIGHT_GEMINI_API_KEY or GEMINI_API_KEY/
   );
+});
+
+test("revision scenarios use local summaries without a Gemini key", async () => {
+  const actual = await execute("schedule-change", "12:00", {
+    LIGHT_CHANGE_SUMMARY_PROVIDER: "local", GEMINI_API_KEY: ""
+  });
+  assert.equal(actual.geminiCalls, 0);
+  assert.match(actual.messages[0].text, /Відключення продовжено/);
+});
+
+test("per-chat reminder threshold can disable one chat without changing another", async () => {
+  const dir = await createTempDir();
+  const subscriptionsFile = path.join(dir, "subscriptions.json");
+  await fs.writeFile(subscriptionsFile, JSON.stringify({ queues: { "5.1": { enabled: true, chats: [
+    { chatId: "quiet", settings: { outageReminderBeforeMinutes: 0 } },
+    { chatId: "reminded", settings: { outageReminderBeforeMinutes: 10 } }
+  ] } } }));
+  const actual = await execute("off-reminder", "20:50", {
+    LIGHT_SUBSCRIPTIONS_FILE: subscriptionsFile, LIGHT_CHANGE_SUMMARY_PROVIDER: "local"
+  });
+  assert.equal(actual.result.notificationCount, 1);
+  assert.deepEqual(actual.messages.map(message => message.chat_id), ["reminded"]);
+});
+
+test("per-chat image setting selects photo or text independently", async () => {
+  const dir = await createTempDir();
+  const subscriptionsFile = path.join(dir, "subscriptions.json");
+  await fs.writeFile(subscriptionsFile, JSON.stringify({ queues: { "5.1": { enabled: true, chats: [
+    { chatId: "text", settings: { scheduleImageEnabled: false } },
+    { chatId: "photo", settings: { scheduleImageEnabled: true } }
+  ] } } }));
+  const deliveries = [];
+  const result = await runScenario({ caseName: "initial", env: {
+    ...baseEnv, LIGHT_SUBSCRIPTIONS_FILE: subscriptionsFile, LIGHT_CHANGE_SUMMARY_PROVIDER: "local"
+  }, fetchImpl: (url, options) => {
+    if (String(url).includes("api.telegram.org")) {
+      deliveries.push({ endpoint: String(url).split("/").at(-1), chatId: options.body instanceof FormData
+        ? options.body.get("chat_id") : JSON.parse(options.body).chat_id });
+      return Promise.resolve(createTextResponse(200, JSON.stringify({ ok: true })));
+    }
+    return fetch(url, options);
+  } });
+  assert.equal(result.notificationCount, 4);
+  assert.deepEqual(deliveries.filter(item => item.chatId === "text").map(item => item.endpoint),
+    ["sendMessage", "sendMessage"]);
+  assert.deepEqual(deliveries.filter(item => item.chatId === "photo").map(item => item.endpoint),
+    ["sendPhoto", "sendPhoto"]);
 });
 
 test("fan-out skips a past-only today revision before Telegram and Gemini", async () => {

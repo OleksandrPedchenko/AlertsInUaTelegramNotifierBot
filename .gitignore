@@ -10,3 +10,4 @@ logs/
 .light-poe-test.lock
 .light-poe-test-state.json
 light-subscriptions.json
+light-subscriptions.json.*
