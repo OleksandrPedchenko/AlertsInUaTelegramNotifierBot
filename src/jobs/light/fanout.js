@@ -195,7 +195,13 @@ async function runFanout(env = process.env, options = {}) {
   const ownsLogger = !options.logger;
   const logger = options.logger || createLogger({ cwd, fetchImpl: options.fetchImpl, ...config.log });
   const release = await acquireRunLock(config.job.lockFilePath);
-  if (!release) return { skipped: true };
+  if (!release) {
+    logger.warn("Another light job instance is already running; skipping this run", {
+      jobName: "light", lockFilePath: config.job.lockFilePath
+    });
+    if (ownsLogger) await logger.flush?.();
+    return { skipped: true };
+  }
   try {
     logger.info("Starting light fan-out", { jobName: "light", subscriptions: subscriptions.length });
     const deps = { logger, requestWithRetry, fetchImpl: options.fetchImpl };
@@ -280,11 +286,18 @@ async function runFanout(env = process.env, options = {}) {
         }
       } catch (error) {
         failures.push(item.stateKey);
-        logger.error("Light subscription failed", { jobName: "light", stateKey: item.stateKey, error });
+        logger.error("Light subscription failed", {
+          jobName: "light", stateKey: item.stateKey, queue: item.queueKey,
+          chatId: item.config.telegram.chatId, error
+        });
       }
     }
     logger.info("Light fan-out completed", { jobName: "light", subscriptions: items.length, notificationCount, failures: failures.length });
-    if (failures.length) throw new Error(`Failed light subscriptions: ${failures.join(", ")}`);
+    if (failures.length) {
+      const error = new Error(`Failed light subscriptions: ${failures.join(", ")}`);
+      error.alreadyLogged = true;
+      throw error;
+    }
     return { skipped: false, subscriptions: items.length, notificationCount };
   } finally {
     await release();

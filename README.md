@@ -243,6 +243,8 @@ Example light job every minute:
 - Logs are emitted as JSON lines for easier ingestion in production logging systems.
 - Logs are persisted to `LOG_FILE_PATH` (default `alerts.log` in project root). The default `.gitignore` already excludes `*.log`.
 - Logs are also buffered during a run and pushed to Loki after the job finishes at `LOKI_PROTOCOL://LOKI_IP:LOKI_PORT/loki/api/v1/push` with `app`, `level`, and `job` stream labels.
+- Actionable job and pin failures use `level=error` for Grafana alerts. Expected overlaps, retries, and optional Gemini or image fallbacks use lower levels. A malformed state file stops the run without overwriting it; inspect or restore that file before retrying. A lock owned by a dead process is removed automatically, while an invalid lock owner fails visibly.
+- If Loki itself is unavailable, the logger reports the push failure to stderr and the JSON-lines file remains the local record. Grafana cannot alert on logs that Loki did not receive, so monitor Loki ingestion separately.
 - The light job fetches the POE schedule with one GET request, parses today/tomorrow tables, and sends a Telegram message only when the selected queue/subqueue schedule fingerprint changes.
 - For light job development without touching POE, set `LIGHT_USE_STUB=true`; by default it parses `light-example.html` from the project root.
 - Changed light notifications use local outage calculations by default. With `LIGHT_CHANGE_SUMMARY_PROVIDER=gemini`, they send normalized previous/current segments to Gemini using `models/{model}:generateContent`. Either summary appears above an expandable quote with `Було` / `Тепер`; the quote still contains the full old and new schedules if summarization fails.

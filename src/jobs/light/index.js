@@ -32,15 +32,19 @@ async function main(options = {}) {
       logger
     });
   } catch (error) {
+    if (error.alreadyLogged) {
+      process.exitCode = 1;
+      return;
+    }
     if (error instanceof ConfigError) {
-      logger.error("Configuration error", { error: error.message });
+      logger.error("Configuration error", { jobName: "light", error });
       process.exitCode = 1;
       return;
     }
 
     if (error instanceof HttpRequestError) {
       logger.error("HTTP request failed", {
-        error: error.message,
+        jobName: "light", error,
         status: error.status,
         body: error.body
       });
@@ -50,7 +54,7 @@ async function main(options = {}) {
 
     if (error instanceof NotificationError) {
       logger.error("Notification failed", {
-        error: error.message,
+        jobName: "light", error,
         status: error.status,
         body: error.body
       });
@@ -58,7 +62,7 @@ async function main(options = {}) {
       return;
     }
 
-    logger.error("Unexpected job failure", { error });
+    logger.error("Unexpected job failure", { jobName: "light", error });
     process.exitCode = 1;
   } finally {
     await logger.flush?.();
@@ -69,14 +73,16 @@ if (require.main === module) {
   process.on("unhandledRejection", async (reason) => {
     const logger = createLoggerFromEnv(process.env);
     logger.error("Unhandled promise rejection", {
+      jobName: "light",
       reason: reason instanceof Error ? reason : new Error(String(reason))
     });
     await logger.flush?.();
+    process.exitCode = 1;
   });
 
   process.on("uncaughtException", async (error) => {
     const logger = createLoggerFromEnv(process.env);
-    logger.error("Uncaught exception", { error });
+    logger.error("Uncaught exception", { jobName: "light", error });
     await logger.flush?.();
     process.exit(1);
   });

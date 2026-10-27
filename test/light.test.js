@@ -947,3 +947,18 @@ test("light stub mode reads local html and skips POE requests", async () => {
   assert.equal(telegramBody.chat_id, "tg-chat");
   assert.match(telegramBody.text, /З’явився графік на завтра · черга 2\.2/);
 });
+
+test("pin state failures are ERROR logs with the affected state key", async () => {
+  const dir = await createTempDir();
+  const logger = createMemoryLogger();
+  const config = { job: { pinTodaySchedule: true, stateFilePath: dir }, telegram: { chatId: "chat" } };
+  const currentState = { scheduleDate: "2026-10-27", today: { timePeriods: [{ status: "off", time: "08:00", durationMinutes: 60 }] } };
+  const deps = { logger };
+  const stateKey = "light:1.1:chat:chat";
+  await lightPlugin.afterTelegramSend({ config, stateKey, currentState,
+    notification: { type: "schedule-change:today" }, message: { message_id: 123 }, kind: "text", deps });
+  await lightPlugin.syncTodayPin({ config, stateKey, currentState, deps });
+  const errors = logger.entries.filter(entry => entry.level === "error");
+  assert.equal(errors.length, 1);
+  assert.ok(errors.every(entry => entry.meta.stateKey === stateKey && entry.meta.error instanceof Error));
+});
