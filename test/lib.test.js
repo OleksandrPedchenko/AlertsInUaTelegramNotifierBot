@@ -8,9 +8,10 @@ const test = require("node:test");
 const { requestWithRetry, HttpRequestError } = require("../src/lib/httpClient");
 const { acquireRunLock } = require("../src/lib/lock");
 const { createLoggerFromEnv } = require("../src/lib/logger");
+const { main: alertsMain } = require("../src/jobs/alerts/index");
 const { runPluginJob } = require("../src/lib/runner");
 const { readJobState, writeJobState } = require("../src/lib/stateStore");
-const { createSilentLogger, createTempDir, createTextResponse } = require("./helpers");
+const { createMemoryLogger, createSilentLogger, createTempDir, createTextResponse } = require("./helpers");
 
 test("lock acquisition skips overlapping runs and releases lock", async () => {
   const dir = await createTempDir();
@@ -27,13 +28,27 @@ test("lock acquisition skips overlapping runs and releases lock", async () => {
   await secondRelease();
 });
 
-test("state store reads missing and invalid files as empty and writes keyed state", async () => {
+test("dead process lock is removed so a later run can start", async () => {
+  const dir = await createTempDir();
+  const lockPath = path.join(dir, "job.lock");
+  await fs.writeFile(lockPath, "99999999");
+  const release = await acquireRunLock(lockPath);
+  assert.equal(typeof release, "function");
+  await release();
+  await assert.rejects(fs.stat(lockPath), { code: "ENOENT" });
+});
+
+test("unreadable lock owner fails visibly instead of silently skipping forever", async () => {
+  const dir = await createTempDir();
+  const lockPath = path.join(dir, "job.lock");
+  await fs.writeFile(lockPath, "not-a-pid");
+  await assert.rejects(acquireRunLock(lockPath), /job.lock/);
+});
+
+test("state store reads missing files as empty and writes keyed state", async () => {
   const dir = await createTempDir();
   const statePath = path.join(dir, "state.json");
 
-  assert.equal(await readJobState(statePath, "job:key"), null);
-
-  await fs.writeFile(statePath, "{invalid json", "utf8");
   assert.equal(await readJobState(statePath, "job:key"), null);
 
   await writeJobState(statePath, "job:key", { value: "A" }, "fingerprint-A");
@@ -42,6 +57,36 @@ test("state store reads missing and invalid files as empty and writes keyed stat
   assert.equal(record.stateKey, "job:key");
   assert.equal(record.fingerprint, "fingerprint-A");
   assert.deepEqual(record.state, { value: "A" });
+});
+
+test("malformed state fails without overwriting the saved file", async () => {
+  const dir = await createTempDir();
+  const statePath = path.join(dir, "state.json");
+  await fs.writeFile(statePath, "{invalid json", "utf8");
+  await assert.rejects(readJobState(statePath, "job:key"), /state.json/);
+  await assert.rejects(writeJobState(statePath, "job:key", { value: "A" }, "A"), /state.json/);
+  assert.equal(await fs.readFile(statePath, "utf8"), "{invalid json");
+});
+
+test("alerts entrypoint logs corrupt state once with job and file context", async () => {
+  const dir = await createTempDir();
+  const statePath = path.join(dir, "state.json");
+  await fs.writeFile(statePath, "{invalid json");
+  const logger = createMemoryLogger();
+  const priorExitCode = process.exitCode;
+  try {
+    await alertsMain({ logger, config: {
+      job: { lockFilePath: path.join(dir, "job.lock"), stateFilePath: statePath },
+      api: { regionId: 1 }
+    } });
+    const errors = logger.entries.filter(entry => entry.level === "error");
+    assert.equal(errors.length, 1);
+    assert.equal(errors[0].meta.jobName, "alerts");
+    assert.match(errors[0].meta.error.message, /state.json/);
+    assert.equal(process.exitCode, 1);
+  } finally {
+    process.exitCode = priorExitCode;
+  }
 });
 
 test("runner skips notification when fingerprint is unchanged", async () => {
@@ -342,4 +387,23 @@ test("logger writes JSON lines to file and pushes buffered logs to Loki on flush
 
   await logger.flush();
   assert.equal(lokiPushes.length, 1);
+});
+
+test("ERROR log retains the underlying cause in the Loki payload", async () => {
+  const dir = await createTempDir();
+  const pushes = [];
+  const logger = createLoggerFromEnv({ LOG_FILE_PATH: path.join(dir, "app.log") }, {
+    consoleWriter: { log() {}, error() {} },
+    fetchImpl: async (_url, options) => {
+      pushes.push(JSON.parse(options.body));
+      return createTextResponse(204, "");
+    }
+  });
+  logger.error("Job failed", { jobName: "alerts", error: new Error("wrapper", { cause: new Error("disk full") }) });
+  await logger.flush();
+  const stream = pushes[0].streams[0];
+  assert.equal(stream.stream.level, "error");
+  assert.equal(stream.stream.job, "alerts");
+  const entry = JSON.parse(stream.values[0][1]);
+  assert.equal(entry.error.cause.message, "disk full");
 });
