@@ -38,11 +38,93 @@ test("dead process lock is removed so a later run can start", async () => {
   await assert.rejects(fs.stat(lockPath), { code: "ENOENT" });
 });
 
+test("concurrent stale-lock recovery grants only one run", async () => {
+  const dir = await createTempDir();
+  const lockPath = path.join(dir, "job.lock");
+  await fs.writeFile(lockPath, "99999999");
+  const originalOpen = fs.open;
+  const originalUnlink = fs.unlink;
+  let signalOpened;
+  const opened = new Promise(resolve => { signalOpened = resolve; });
+  let unlinks = 0;
+  const releases = [];
+  fs.open = async (...args) => {
+    const handle = await originalOpen(...args);
+    if (args[0] === lockPath && args[1] === "wx") signalOpened();
+    return handle;
+  };
+  fs.unlink = async (...args) => {
+    if (args[0] === lockPath && ++unlinks === 2) await opened;
+    return originalUnlink(...args);
+  };
+  try {
+    const results = await Promise.all([acquireRunLock(lockPath), acquireRunLock(lockPath)]);
+    releases.push(...results.filter(Boolean));
+    assert.equal(releases.length, 1);
+  } finally {
+    fs.open = originalOpen;
+    fs.unlink = originalUnlink;
+    for (const release of releases) await release().catch(() => undefined);
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("recovery guard stays held until the replacement lock is acquired", async () => {
+  const dir = await createTempDir();
+  const lockPath = path.join(dir, "job.lock");
+  await fs.writeFile(lockPath, "99999999");
+  const originalOpen = fs.open;
+  let lockAttempts = 0;
+  let guardHeld = false;
+  fs.open = async (...args) => {
+    if (args[0] === lockPath && args[1] === "wx" && ++lockAttempts === 2) {
+      await new Promise(resolve => setTimeout(resolve, 20));
+      guardHeld = Boolean(await fs.stat(`${lockPath}.recovery`).catch(() => null));
+    }
+    return originalOpen(...args);
+  };
+  let release;
+  try {
+    release = await acquireRunLock(lockPath);
+    assert.equal(typeof release, "function");
+    assert.equal(guardHeld, true);
+  } finally {
+    fs.open = originalOpen;
+    if (release) await release();
+  }
+});
+
 test("unreadable lock owner fails visibly instead of silently skipping forever", async () => {
   const dir = await createTempDir();
   const lockPath = path.join(dir, "job.lock");
   await fs.writeFile(lockPath, "not-a-pid");
   await assert.rejects(acquireRunLock(lockPath), /job.lock/);
+});
+
+test("stale recovery guard fails visibly instead of blocking runs silently", async () => {
+  const dir = await createTempDir();
+  const lockPath = path.join(dir, "job.lock");
+  const recoveryPath = `${lockPath}.recovery`;
+  await fs.writeFile(lockPath, "99999999");
+  await fs.writeFile(recoveryPath, "99999999");
+  const old = new Date(Date.now() - 10000);
+  await fs.utimes(recoveryPath, old, old);
+  await assert.rejects(acquireRunLock(lockPath), /recovery guard/);
+});
+
+test("live lock remains an expected overlap even if recovery guard is stale", async () => {
+  const dir = await createTempDir();
+  const lockPath = path.join(dir, "job.lock");
+  const release = await acquireRunLock(lockPath);
+  const recoveryPath = `${lockPath}.recovery`;
+  await fs.writeFile(recoveryPath, "99999999");
+  const old = new Date(Date.now() - 10000);
+  await fs.utimes(recoveryPath, old, old);
+  try {
+    assert.equal(await acquireRunLock(lockPath), null);
+  } finally {
+    await release();
+  }
 });
 
 test("state store reads missing files as empty and writes keyed state", async () => {
