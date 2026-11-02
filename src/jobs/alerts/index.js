@@ -1,7 +1,7 @@
 "use strict";
 
 const dotenv = require("dotenv");
-const { ConfigError } = require("../../lib/config");
+const { ConfigError, createEnvReader } = require("../../lib/config");
 const { HttpRequestError } = require("../../lib/httpClient");
 const { createLoggerFromEnv } = require("../../lib/logger");
 const { NotificationError } = require("../../lib/telegramNotifier");
@@ -11,6 +11,9 @@ const { alertsPlugin } = require("./plugin");
 dotenv.config({ quiet: true });
 
 async function runAlertsJob(config, options = {}) {
+  if (!createEnvReader(process.env).readBoolean("ALERTS_ENABLED", true)) {
+    return { jobName: alertsPlugin.name, skipped: true };
+  }
   return runPluginJob(alertsPlugin, process.env, {
     ...options,
     config
@@ -18,6 +21,7 @@ async function runAlertsJob(config, options = {}) {
 }
 
 async function main(options = {}) {
+  if (!createEnvReader(process.env).readBoolean("ALERTS_ENABLED", true)) return;
   const logger = options.logger || createLoggerFromEnv(process.env);
 
   try {

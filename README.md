@@ -20,6 +20,14 @@ One-shot Node.js job that fetches active air raid alert state for a region and t
 
    This runs the dedicated alerts cron entrypoint at `src/jobs/alerts/index.js`.
 
+   Enable or disable either scheduled job by updating its flag in `.env`:
+   ```bash
+   npm run disable:alerts
+   npm run enable:alerts
+   npm run disable:poe
+   npm run enable:poe
+   ```
+
    Run the light queue job manually:
    ```bash
    npm run start:light
@@ -42,6 +50,7 @@ One-shot Node.js job that fetches active air raid alert state for a region and t
 
 ## Environment Variables
 
+- `ALERTS_ENABLED` (optional): set `false` to make the alerts job exit without doing work. Default `true`.
 - `ALERTS_API_TOKEN` (required): bearer token for Alerts API.
 - `ALERTS_API_HOST` (optional): default `https://api.alerts.in.ua`.
 - `ALERTS_API_PATH_TEMPLATE` (optional): default `/v1/iot/active_air_raid_alerts/{regionId}.json`.
@@ -74,6 +83,7 @@ One-shot Node.js job that fetches active air raid alert state for a region and t
 
 ### Light Job Variables
 
+- `LIGHT_ENABLED` (optional): set `false` to make the POE light job exit without doing work, including subscription fanout. Default `true`.
 - `LIGHT_QUEUE` (optional): queue number, `1..6`. Falls back to xbar-style `VAR_QUEUE`, then `5`.
 - `LIGHT_SUB_QUEUE` (optional): subqueue number, `1..2`. Falls back to xbar-style `VAR_SUB_QUEUE`, then `1`.
 - `LIGHT_TG_CHAT_ID` (optional): Telegram chat/channel for light notifications. Falls back to `TG_CHAT_ID`.
