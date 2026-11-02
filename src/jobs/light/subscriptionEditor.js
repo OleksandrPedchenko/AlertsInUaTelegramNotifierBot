@@ -56,6 +56,48 @@ function sendJson(response, status, value) {
   response.end(JSON.stringify(value));
 }
 
+async function discoverChats(filePath, botToken, fetchImpl = fetch) {
+  if (!botToken) throw new Error("TG_BOT_TOKEN is missing from .env");
+  async function telegram(method, body = {}) {
+    const response = await fetchImpl(`https://api.telegram.org/bot${botToken}/${method}`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body), signal: AbortSignal.timeout(10000)
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload.ok) throw new Error(`Telegram ${method}: ${payload.description || response.status}`);
+    return payload.result;
+  }
+  const configured = await readSubscriptionDocument(filePath);
+  const ids = new Set(Object.values(configured.normalized.queues)
+    .flatMap(queue => queue.chats.map(chat => chat.chatId)));
+  const me = await telegram("getMe");
+  let notice = "";
+  try {
+    const updates = await telegram("getUpdates", { timeout: 0, limit: 100 });
+    for (const update of updates) {
+      const chat = update.my_chat_member?.chat || update.channel_post?.chat || update.message?.chat;
+      if (chat && ["channel", "supergroup", "group"].includes(chat.type) &&
+          !["left", "kicked"].includes(update.my_chat_member?.new_chat_member?.status)) {
+        ids.add(String(chat.id));
+      }
+    }
+  } catch {
+    notice = "Recent Telegram updates are unavailable; showing configured chats only.";
+  }
+  const chats = [];
+  for (const id of ids) {
+    try {
+      const member = await telegram("getChatMember", { chat_id: id, user_id: me.id });
+      if (["left", "kicked"].includes(member.status)) continue;
+      const chat = await telegram("getChat", { chat_id: id });
+      if (["channel", "supergroup", "group"].includes(chat.type)) {
+        chats.push({ id: String(chat.id), title: chat.title || String(chat.id), type: chat.type });
+      }
+    } catch { /* A configured chat may no longer be accessible to this bot. */ }
+  }
+  return { chats, notice };
+}
+
 async function readJsonBody(request) {
   let body = "";
   for await (const chunk of request) {
@@ -65,7 +107,7 @@ async function readJsonBody(request) {
   return JSON.parse(body);
 }
 
-function createEditorServer({ filePath, host, defaults }) {
+function createEditorServer({ filePath, host, defaults, botToken, fetchImpl }) {
   return http.createServer(async (request, response) => {
     const expectedHost = `${host}:${request.socket.localPort}`;
     if (request.headers.host !== expectedHost) {
@@ -80,6 +122,8 @@ function createEditorServer({ filePath, host, defaults }) {
       } else if (request.method === "GET" && request.url === "/api/subscriptions") {
         const document = await readSubscriptionDocument(filePath);
         sendJson(response, 200, { document: document.normalized, hash: document.hash, defaults, fields: SETTING_FIELDS });
+      } else if (request.method === "GET" && request.url === "/api/chats") {
+        sendJson(response, 200, await discoverChats(filePath, botToken, fetchImpl));
       } else if (request.method === "PUT" && request.url === "/api/subscriptions") {
         if (request.headers.origin !== `http://${expectedHost}` ||
             !request.headers["content-type"]?.startsWith("application/json")) {
@@ -108,7 +152,7 @@ async function main(args = process.argv.slice(2)) {
   await readSubscriptionDocument(filePath);
   const host = selectHost(options.host);
   const defaults = defaultsForEditor(filePath, process.env);
-  const server = createEditorServer({ filePath, host, defaults });
+  const server = createEditorServer({ filePath, host, defaults, botToken: process.env.TG_BOT_TOKEN });
   await new Promise((resolve, reject) => {
     server.once("error", reject);
     server.listen(options.port, host, resolve);
