@@ -366,8 +366,38 @@ test("light reminders include turn-on transitions and reset on a new day", () =>
   const reminder = findPendingOutageReminder({ currentState: state, previousState, thresholdMinutes: 10 });
   assert.equal(reminder.kind, "on");
   assert.equal(reminder.minutesUntilStart, 5);
-  assert.equal(reminder.id, "2026-10-07:on:90-120");
+  assert.equal(reminder.id, "2026-10-07:on:90");
   assert.match(findPendingOutageReminder({ currentState: { ...state, currentMinute: 55 }, previousState, thresholdMinutes: 10 }).id, /^2026-10-07:off:/);
+});
+
+test("extending an outage does not repeat its turn-off reminder", () => {
+  const state = (endMin, currentMinute) => ({
+    today: { timePeriods: [
+      { state: 1, startMin: 0, endMin: 840 },
+      { state: 2, startMin: 840, endMin, time: `14:00 - ${endMin === 930 ? "15:30" : "16:00"}` }
+    ] },
+    currentMinute,
+    scheduleDate: "2026-10-27"
+  });
+  const first = findPendingOutageReminder({ currentState: state(930, 830), previousState: null, thresholdMinutes: 10 });
+  assert.ok(first);
+  const previousState = { outageReminders: { sentIds: [first.id] } };
+  assert.equal(findPendingOutageReminder({
+    currentState: state(960, 839), previousState, thresholdMinutes: 10
+  }), null);
+});
+
+test("legacy sent reminder IDs also prevent a repeat after an outage extension", () => {
+  const currentState = {
+    today: { timePeriods: [
+      { state: 1, startMin: 0, endMin: 840 },
+      { state: 2, startMin: 840, endMin: 960, time: "14:00 - 16:00" }
+    ] },
+    currentMinute: 839,
+    scheduleDate: "2026-10-27"
+  };
+  const previousState = { outageReminders: { sentIds: ["2026-10-27:off:840-930"] } };
+  assert.equal(findPendingOutageReminder({ currentState, previousState, thresholdMinutes: 10 }), null);
 });
 
 test("light reminders include tomorrow's midnight transition", () => {
@@ -380,7 +410,7 @@ test("light reminders include tomorrow's midnight transition", () => {
   assert.equal(reminder.kind, "on");
   assert.equal(reminder.day, "tomorrow");
   assert.equal(reminder.minutesUntilStart, 5);
-  assert.equal(reminder.id, "2026-10-07:on:0-60");
+  assert.equal(reminder.id, "2026-10-07:on:0");
 });
 
 test("an unpublished tomorrow does not trigger a reminder from retained comparison state", () => {

@@ -41,6 +41,12 @@
     .setting-number { display: flex; gap: .4rem; }
     .setting-number select { width: 44%; }
     .hint { color: #53677d; font-size: .9rem; }
+    .discovery { margin-bottom: 1rem; }
+    .discovery-head, .discovered-chat { display: flex; align-items: center; flex-wrap: wrap; gap: .6rem; }
+    .discovery-head h2 { margin-right: auto; }
+    .discovered-chat { border-top: 1px solid #dce3eb; padding: .6rem 0; }
+    .discovered-chat strong { flex: 1; min-width: 180px; }
+    .discovered-chat code { font-size: 1rem; }
   </style>
 </head>
 <body>
@@ -52,6 +58,12 @@
       <button type="button" id="save">Save subscriptions</button>
     </div>
     <p id="status" role="status" aria-live="polite"></p>
+    <section class="queue discovery" aria-labelledby="discovery-title">
+      <div class="discovery-head"><h2 id="discovery-title">Telegram chats</h2><button type="button" id="refresh-chats" class="secondary">Refresh chats</button></div>
+      <p class="hint">Channels and groups found in saved subscriptions or recent Telegram updates. Telegram cannot list every chat a bot has joined; post in an undiscovered channel or re-add the bot, then refresh.</p>
+      <p id="chats-status" role="status" aria-live="polite"></p>
+      <div id="discovered-chats"></div>
+    </section>
     <div id="queues" class="grid"></div>
   </main>
   <script>
@@ -66,6 +78,9 @@
     const root = document.getElementById("queues");
     const status = document.getElementById("status");
     const saveButton = document.getElementById("save");
+    const chatsButton = document.getElementById("refresh-chats");
+    const chatsStatus = document.getElementById("chats-status");
+    const chatsRoot = document.getElementById("discovered-chats");
 
     function setStatus(message, kind = "") {
       status.textContent = message;
@@ -179,6 +194,46 @@
       }
     }
 
+    async function loadChats() {
+      chatsButton.disabled = true;
+      chatsStatus.textContent = "Checking Telegram…";
+      try {
+        const response = await fetch("/api/chats", { cache: "no-store" });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error || "Could not load chats");
+        chatsRoot.replaceChildren();
+        for (const chat of payload.chats) {
+          const row = element("div", "discovered-chat");
+          const name = element("strong", "", chat.title);
+          const kind = element("span", "hint", chat.type);
+          const id = element("code", "", chat.id);
+          const copy = element("button", "secondary", "Copy ID");
+          copy.type = "button";
+          copy.setAttribute("aria-label", `Copy chat ID for ${chat.title}`);
+          copy.addEventListener("click", async () => {
+            try {
+              if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(chat.id);
+              else {
+                const input = element("input");
+                input.value = chat.id;
+                document.body.append(input);
+                input.select();
+                const copied = document.execCommand("copy");
+                input.remove();
+                if (!copied) throw new Error("Clipboard unavailable");
+              }
+              chatsStatus.textContent = `Copied ${chat.id}`;
+            } catch { chatsStatus.textContent = `Copy unavailable. Select ${chat.id} manually.`; }
+          });
+          row.append(name, kind, id, copy);
+          chatsRoot.append(row);
+        }
+        chatsStatus.textContent = payload.notice || (payload.chats.length ? `${payload.chats.length} chats found.` : "No chats found yet.");
+      } catch (error) {
+        chatsStatus.textContent = error.message;
+      } finally { chatsButton.disabled = false; }
+    }
+
     async function load() {
       setStatus("Loading…");
       const response = await fetch("/api/subscriptions", { cache: "no-store" });
@@ -219,7 +274,9 @@
 
     document.getElementById("reload").addEventListener("click", () => load().catch(error => setStatus(error.message, "error")));
     saveButton.addEventListener("click", save);
+    chatsButton.addEventListener("click", loadChats);
     load().catch(error => setStatus(error.message, "error"));
+    loadChats();
   </script>
 </body>
 </html>

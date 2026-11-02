@@ -123,3 +123,44 @@ test("editor opens an all-disabled template so the first chat can be enabled", a
     await new Promise(resolve => server.close(resolve));
   }
 });
+
+test("editor discovers current Telegram channels from subscriptions and pending updates", async () => {
+  const dir = await createTempDir();
+  const file = path.join(dir, "subscriptions.json");
+  await fs.writeFile(file, JSON.stringify({ queues: {
+    "6.1": { enabled: true, chats: [{ chatId: "-1001", settings: {} }] }
+  } }));
+  const calls = [];
+  const fetchImpl = async (url, options) => {
+    const method = url.split("/").at(-1);
+    const data = JSON.parse(options.body);
+    calls.push({ method, data });
+    if (method === "getMe") return Response.json({ ok: true, result: { id: 42 } });
+    if (method === "getUpdates") return Response.json({ ok: true, result: [
+      { update_id: 1, channel_post: { chat: { id: -1002, type: "channel", title: "New channel" } } },
+      { update_id: 2, my_chat_member: { chat: { id: -1003, type: "channel", title: "Removed" }, new_chat_member: { status: "left" } } },
+      { update_id: 3, message: { chat: { id: 7, type: "private" } } }
+    ] });
+    if (method === "getChatMember") return Response.json({ ok: true, result: {
+      status: data.chat_id === "-1001" ? "administrator" : "member"
+    } });
+    if (method === "getChat") return Response.json({ ok: true, result: {
+      id: Number(data.chat_id), type: "channel", title: data.chat_id === "-1001" ? "Existing channel" : "New channel"
+    } });
+    throw new Error(`Unexpected Telegram method: ${method}`);
+  };
+  const server = createEditorServer({ filePath: file, host: "127.0.0.1", defaults: {}, botToken: "test-token", fetchImpl });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const response = await fetch(`http://127.0.0.1:${server.address().port}/api/chats`);
+    assert.equal(response.status, 200);
+    assert.deepEqual((await response.json()).chats, [
+      { id: "-1001", title: "Existing channel", type: "channel" },
+      { id: "-1002", title: "New channel", type: "channel" }
+    ]);
+    assert.equal(calls.find(call => call.method === "getUpdates").data.offset, undefined);
+    assert.equal(calls.some(call => call.data.chat_id === "-1003"), false);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
+});

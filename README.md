@@ -20,6 +20,14 @@ One-shot Node.js job that fetches active air raid alert state for a region and t
 
    This runs the dedicated alerts cron entrypoint at `src/jobs/alerts/index.js`.
 
+   Enable or disable either scheduled job by updating its flag in `.env`:
+   ```bash
+   npm run disable:alerts
+   npm run enable:alerts
+   npm run disable:poe
+   npm run enable:poe
+   ```
+
    Run the light queue job manually:
    ```bash
    npm run start:light
@@ -42,6 +50,7 @@ One-shot Node.js job that fetches active air raid alert state for a region and t
 
 ## Environment Variables
 
+- `ALERTS_ENABLED` (optional): set `false` to make the alerts job exit without doing work. Default `true`.
 - `ALERTS_API_TOKEN` (required): bearer token for Alerts API.
 - `ALERTS_API_HOST` (optional): default `https://api.alerts.in.ua`.
 - `ALERTS_API_PATH_TEMPLATE` (optional): default `/v1/iot/active_air_raid_alerts/{regionId}.json`.
@@ -74,6 +83,7 @@ One-shot Node.js job that fetches active air raid alert state for a region and t
 
 ### Light Job Variables
 
+- `LIGHT_ENABLED` (optional): set `false` to make the POE light job exit without doing work, including subscription fanout. Default `true`.
 - `LIGHT_QUEUE` (optional): queue number, `1..6`. Falls back to xbar-style `VAR_QUEUE`, then `5`.
 - `LIGHT_SUB_QUEUE` (optional): subqueue number, `1..2`. Falls back to xbar-style `VAR_SUB_QUEUE`, then `1`.
 - `LIGHT_TG_CHAT_ID` (optional): Telegram chat/channel for light notifications. Falls back to `TG_CHAT_ID`.
@@ -156,6 +166,8 @@ npm run light:subscriptions:web
 ```
 
 It reads `LIGHT_SUBSCRIPTIONS_FILE` from `.env` and uses port 3020. If the machine has several private network addresses, pass `--host YOUR_LAN_IP`; `--file` and `--port` are also supported. Open the printed URL from another device on your network, then stop the editor with Ctrl+C. There is no access code: anyone who can reach this address can edit the file while the editor is running. Save makes a `.bak` copy and checks for changes made outside the page. Saving does not send messages; new destinations receive their first schedule on the next normal bot run.
+
+The **Telegram chats** section uses `TG_BOT_TOKEN` from `.env` to show channel and group IDs found in the subscription file or the bot's recent pending updates. Click **Copy ID**, then add or replace a chat ID under the desired queue and save. Telegram's Bot API cannot enumerate every channel a bot belongs to: updates expire after 24 hours and may already have been consumed by another bot process or webhook. To discover a missing channel, post there or re-add the bot, then click **Refresh chats**. This lookup does not acknowledge or consume updates.
 
 `npm run start:light` remains the systemd command. With the subscriptions file configured, each run fetches the POE schedule once, evaluates each unique queue, and sends Telegram messages to the corresponding chats. Delivery state is saved per queue and chat. If one chat fails, other successful deliveries stay recorded, and only the failed chat retries on the next run. The first run in multi-group mode sends an initial schedule to every configured chat; the old single-queue state is not reused.
 

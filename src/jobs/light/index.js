@@ -13,6 +13,9 @@ const { lightPlugin } = require("./plugin");
 dotenv.config({ quiet: true });
 
 async function runLightJob(config, options = {}) {
+  if (!createEnvReader(process.env).readBoolean("LIGHT_ENABLED", true)) {
+    return { jobName: lightPlugin.name, skipped: true };
+  }
   const selectedConfig = config || options.config || lightPlugin.loadConfig(process.env, createEnvReader(process.env));
   if (selectedConfig.job.subscriptionsFilePath) {
     return runFanout(process.env, { ...options, config: selectedConfig });
@@ -24,6 +27,7 @@ async function runLightJob(config, options = {}) {
 }
 
 async function main(options = {}) {
+  if (!createEnvReader(process.env).readBoolean("LIGHT_ENABLED", true)) return;
   const logger = options.logger || createLoggerFromEnv(process.env);
 
   try {
