@@ -11,6 +11,7 @@ const { sendTelegramNotification } = require("../../lib/telegramNotifier");
 const { loadLightConfig } = require("./config");
 const { buildGeminiUrl, changedWindowsForPrompt, extractGeminiText, trimPeriodsForPrompt } = require("./geminiClient");
 const { effectiveDay } = require("./effectiveSchedule");
+const { processGav } = require("./gav");
 const { parseLightSchedule } = require("./parser");
 const { loadSubscriptions } = require("./subscriptions");
 const { buildCurrentLightState, dateFromCurrentMinute, dayFingerprint, fetchPoeData, getRelevantChangedDays, getCurrentMinute, lightPlugin, previousScheduleForDay, readStubData } = require("./plugin");
@@ -283,6 +284,7 @@ async function runFanout(env = process.env, options = {}) {
         logger.error("Light subscription failed", { jobName: "light", stateKey: item.stateKey, error });
       }
     }
+    notificationCount += await processGav(subscriptions, config, { ...deps, lastSentAt });
     logger.info("Light fan-out completed", { jobName: "light", subscriptions: items.length, notificationCount, failures: failures.length });
     if (failures.length) throw new Error(`Failed light subscriptions: ${failures.join(", ")}`);
     return { skipped: false, subscriptions: items.length, notificationCount };

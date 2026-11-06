@@ -3,6 +3,7 @@
 const { readFile } = require("node:fs/promises");
 
 const SETTING_FIELDS = Object.freeze({
+  gavNotifications: { type: "boolean" },
   changeSummaryProvider: { type: "choice", values: ["local", "gemini"], env: "LIGHT_CHANGE_SUMMARY_PROVIDER" },
   treatYellowAsGreen: { type: "boolean", env: "LIGHT_TREAT_YELLOW_AS_GREEN" },
   scheduleImageEnabled: { type: "boolean", env: "LIGHT_SCHEDULE_IMAGE_ENABLED" },
