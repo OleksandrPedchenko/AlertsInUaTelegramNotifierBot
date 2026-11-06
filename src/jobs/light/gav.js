@@ -4,6 +4,7 @@ const { JSDOM } = require("jsdom");
 const { requestWithRetry } = require("../../lib/httpClient");
 const { readJobState, writeJobState } = require("../../lib/stateStore");
 const { sendTelegramMessage } = require("../../lib/telegramNotifier");
+const { buildGavNotification } = require("./messageCatalog");
 
 const CHANNEL_URL = "https://t.me/s/poltavaOE";
 const ACTIVE_KEY = "light:gav:active-chats";
@@ -52,13 +53,6 @@ async function fetchPosts(after, config, deps) {
   throw new Error("POE Telegram channel history exceeded 25 pages; checkpoint retained");
 }
 
-function messageFor(post) {
-  const title = post.type === "cancelled" ? "ГАВ скасовано" : "ГАВ застосовано";
-  const detail = post.text.replace(/^.*?!\s*/s, "").trim();
-  const escaped = detail.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  return `<b>${title}</b>\n${escaped}\n\n<a href="https://t.me/poltavaOE/${post.id}">Джерело: Полтаваобленерго</a>`;
-}
-
 async function processGav(subscriptions, config, deps) {
   const chats = [...new Set(subscriptions.filter(item => item.settings.gavNotifications).map(item => item.chatId))];
   const previousActive = (await readJobState(config.job.stateFilePath, ACTIVE_KEY))?.state?.chatIds || [];
@@ -90,7 +84,7 @@ async function processGav(subscriptions, config, deps) {
         if (post.type) {
           const waitMs = 1100 - (Date.now() - (deps.lastSentAt?.get(chatId) || 0));
           if (waitMs > 0) await new Promise(resolve => setTimeout(resolve, waitMs));
-          await sendTelegramMessage(messageFor(post), { ...config.telegram, chatId }, deps);
+          await sendTelegramMessage(buildGavNotification(post), { ...config.telegram, chatId }, deps);
           deps.lastSentAt?.set(chatId, Date.now());
           sent += 1;
         }

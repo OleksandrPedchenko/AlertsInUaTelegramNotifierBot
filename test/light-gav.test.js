@@ -64,10 +64,9 @@ test("GAV polling baselines new chats, sends new posts once, and retries failed 
     [102, "ГАВ скасовано!<br>О 13:30 скасовано 5 черг ГАВ."]];
   await run();
   assert.deepEqual(sent.map(message => message.chat_id), ["a", "a"]);
-  assert.match(sent[0].text, /ГАВ застосовано/);
+  assert.match(sent[0].text, /^<b>🔴 В області застосовано ГАВ<\/b>\n\nО 13:00/);
   assert.match(sent[0].text, /О 13:00 введено 5 черг/);
-  assert.match(sent[0].text, /https:\/\/t\.me\/poltavaOE\/101/);
-  assert.match(sent[1].text, /ГАВ скасовано/);
+  assert.match(sent[1].text, /^<b>🟢 ГАВ скасовано<\/b>\n\nО 13:30/);
   await run();
   assert.equal(sent.length, 2);
 

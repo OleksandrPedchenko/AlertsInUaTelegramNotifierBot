@@ -137,7 +137,14 @@ function buildOutageReminderNotification(currentState, reminder) {
   ].join("\n");
 }
 
+function buildGavNotification(post) {
+  const headline = post.type === "cancelled" ? "🟢 ГАВ скасовано" : "🔴 В області застосовано ГАВ";
+  const detail = post.text.replace(/^(?:В області застосовано ГАВ|ГАВ скасовано)!?\s*/i, "").trim();
+  return [`<b>${headline}</b>`, "", escapeHtml(detail)].join("\n");
+}
+
 module.exports = {
+  buildGavNotification,
   buildOutageReminderNotification,
   buildScheduleDetails,
   buildLightNotification,
