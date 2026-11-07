@@ -3,6 +3,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const {
+  buildGavNotification,
   buildDayLightNotification,
   buildLightNotification,
   buildOutageReminderNotification
@@ -87,4 +88,12 @@ test("reminders lead with colored action and quote the full schedule", () => {
     assert.doesNotMatch(message, /Джерело|example\.test/);
     assert.doesNotMatch(message, /← зараз/);
   }
+});
+
+test("GAV notices use the light message headline and body layout", () => {
+  const applied = buildGavNotification({ type: "applied", text: "В області застосовано ГАВ!\nО 12:11 введено 5 черг." });
+  const cancelled = buildGavNotification({ type: "cancelled", text: "ГАВ скасовано!\nО 12:41 скасовано 5 черг ГАВ." });
+  assert.equal(applied, "<b>🔴 В області застосовано ГАВ</b>\n\nО 12:11 введено 5 черг.");
+  assert.equal(cancelled, "<b>🟢 ГАВ скасовано</b>\n\nО 12:41 скасовано 5 черг ГАВ.");
+  assert.doesNotMatch(applied + cancelled, /Джерело|https?:\/\//);
 });

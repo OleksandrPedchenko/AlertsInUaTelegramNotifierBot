@@ -31,6 +31,8 @@
     .chat { border: 1px solid #dce3eb; border-radius: 8px; padding: .8rem; margin: .7rem 0; }
     .chat-head { display: flex; align-items: end; gap: .5rem; }
     .chat-head label { flex: 1; }
+    .gav-option { display: flex; align-items: center; gap: .5rem; margin-top: .7rem; }
+    .gav-option input { margin: 0; }
     label { display: block; font-weight: 600; }
     input[type=text], input[type=number], select { display: block; width: 100%; border: 1px solid #aebccd; border-radius: 5px; padding: .45rem; font: inherit; background: white; color: #152334; }
     input[type=checkbox] { width: 1rem; height: 1rem; vertical-align: middle; }
@@ -158,11 +160,23 @@
       });
       head.append(label, remove);
       card.append(head);
+      chat.settings ||= {};
+      const gavLabel = element("label", "gav-option");
+      const gavToggle = element("input");
+      gavToggle.type = "checkbox";
+      gavToggle.checked = chat.settings.gavNotifications === true;
+      gavToggle.addEventListener("change", () => {
+        if (gavToggle.checked) chat.settings.gavNotifications = true;
+        else delete chat.settings.gavNotifications;
+      });
+      gavLabel.append(gavToggle, "ГАВ alerts");
+      card.append(gavLabel);
       const details = element("details");
       details.append(element("summary", "", "Notification settings"));
       const settings = element("div", "settings");
-      chat.settings ||= {};
-      for (const key of Object.keys(fields)) settings.append(settingControl(key, chat.settings));
+      for (const key of Object.keys(fields).filter(key => key !== "gavNotifications")) {
+        settings.append(settingControl(key, chat.settings));
+      }
       details.append(settings);
       card.append(details);
       return card;
@@ -170,7 +184,8 @@
 
     function render() {
       root.replaceChildren();
-      for (const [queueKey, entry] of Object.entries(documentData.queues)) {
+      for (const [queueKey, entry] of Object.entries(documentData.queues)
+        .sort((left, right) => Number(right[1].enabled) - Number(left[1].enabled))) {
         const card = element("section", "queue");
         card.dataset.queue = queueKey;
         const head = element("div", "queue-head");

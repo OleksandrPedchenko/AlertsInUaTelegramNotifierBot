@@ -225,6 +225,7 @@ function loadLightConfig(_env, readers) {
       )
     },
     job: {
+      gavNotifications: false,
       changeSummaryProvider,
       subscriptionsFilePath,
       lockFilePath: readers.readResolvedPath("LIGHT_LOCK_FILE_PATH", ".light-job.lock"),

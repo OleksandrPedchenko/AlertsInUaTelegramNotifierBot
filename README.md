@@ -138,7 +138,9 @@ Each chat can override notification behavior independently, even when two chats 
 }
 ```
 
-Allowed settings are `changeSummaryProvider` (`local` or `gemini`), `treatYellowAsGreen`, `scheduleImageEnabled`, `pinTodaySchedule`, `scheduleImageLayout` (`horizontal` or `vertical`), `alwaysSendTgMessage`, and `outageReminderBeforeMinutes` (`0..1440`). The four on/off settings take JSON booleans. Unknown keys and invalid values fail before the POE request. The old `chatIds` arrays and top-level `subscriptions` array still work; a queue entry cannot contain both `chats` and `chatIds`. The POE request, bot token, retry settings, state file, lock, and Gemini request budget remain shared.
+Allowed settings are `gavNotifications`, `changeSummaryProvider` (`local` or `gemini`), `treatYellowAsGreen`, `scheduleImageEnabled`, `pinTodaySchedule`, `scheduleImageLayout` (`horizontal` or `vertical`), `alwaysSendTgMessage`, and `outageReminderBeforeMinutes` (`0..1440`). The on/off settings take JSON booleans. Unknown keys and invalid values fail before the POE request. The old `chatIds` arrays and top-level `subscriptions` array still work; a queue entry cannot contain both `chats` and `chatIds`. The POE request, bot token, retry settings, state file, lock, and Gemini request budget remain shared.
+
+`gavNotifications` is off for every chat unless explicitly set to `true` in its settings through JSON or the subscription Web UI. When enabled, the light job reads new posts from the public `@poltavaOE` channel and sends application and cancellation notices. It sends each post once per chat, including when that chat subscribes to several queues. The first run after enabling records the latest post without sending historical notices; disabling and re-enabling resets that baseline. A failed delivery retries on the next run. Channel polling depends on Telegram's public web preview format.
 
 To convert an existing file, first preview the result, then write it with a backup:
 

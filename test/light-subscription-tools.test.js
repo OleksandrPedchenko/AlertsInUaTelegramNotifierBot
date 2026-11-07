@@ -71,8 +71,12 @@ test("editor saves valid changes and rejects cross-origin and stale edits", asyn
   try {
     const page = await fetch(base);
     assert.equal(page.status, 200);
-    assert.match(await page.text(), /Save subscriptions/);
+    const html = await page.text();
+    assert.match(html, /Save subscriptions/);
+    assert.match(html, /ГАВ alerts/);
     const loaded = await (await fetch(`${base}/api/subscriptions`)).json();
+    assert.equal(loaded.fields.gavNotifications.type, "boolean");
+    assert.equal(loaded.document.queues["6.1"].chats[0].settings.gavNotifications, undefined);
     const invalid = structuredClone(loaded.document);
     invalid.queues["6.1"].chats[0].settings.unexpected = true;
     const rejected = await fetch(`${base}/api/subscriptions`, {
@@ -82,6 +86,7 @@ test("editor saves valid changes and rejects cross-origin and stale edits", asyn
     assert.equal(rejected.status, 400);
     assert.deepEqual(JSON.parse(await fs.readFile(file, "utf8")), legacy);
     loaded.document.queues["6.1"].chats[0].settings.pinTodaySchedule = false;
+    loaded.document.queues["6.1"].chats[0].settings.gavNotifications = true;
     const body = JSON.stringify({ document: loaded.document, hash: loaded.hash });
     const badOrigin = await fetch(`${base}/api/subscriptions`, {
       method: "PUT", headers: { "Content-Type": "application/json", Origin: "http://elsewhere" }, body
@@ -92,6 +97,7 @@ test("editor saves valid changes and rejects cross-origin and stale edits", asyn
     });
     assert.equal(saved.status, 200);
     assert.equal((await readSubscriptionDocument(file)).normalized.queues["6.1"].chats[0].settings.pinTodaySchedule, false);
+    assert.equal((await readSubscriptionDocument(file)).normalized.queues["6.1"].chats[0].settings.gavNotifications, true);
     const stale = await fetch(`${base}/api/subscriptions`, {
       method: "PUT", headers: { "Content-Type": "application/json", Origin: base }, body
     });

@@ -46,3 +46,12 @@ test("legacy array converts to queue-keyed chats", () => {
     { chatId: "y", settings: { pinTodaySchedule: false } }
   ]);
 });
+
+test("GAV subscription is off by default and accepts only booleans", () => {
+  const source = { queues: { "1.1": { enabled: true, chats: [{ chatId: "a", settings: {} }] } } };
+  assert.equal(parseSubscriptions(source)[0].settings.gavNotifications, undefined);
+  source.queues["1.1"].chats[0].settings.gavNotifications = true;
+  assert.equal(parseSubscriptions(source)[0].settings.gavNotifications, true);
+  source.queues["1.1"].chats[0].settings.gavNotifications = "true";
+  assert.throws(() => parseSubscriptions(source), /gavNotifications/);
+});
