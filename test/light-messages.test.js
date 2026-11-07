@@ -36,6 +36,16 @@ test("new schedules show colored full periods without source or quote", () => {
   assert.doesNotMatch(initial, /← зараз/);
 });
 
+test("tomorrow notification uses tomorrow's publication time", () => {
+  const schedule = { ...state, tomorrow: { ...day, updatedAt: "Оновлено о 14:30" } };
+  const todayMessage = buildDayLightNotification(schedule, null, "today");
+  const tomorrowMessage = buildDayLightNotification(schedule, null, "tomorrow");
+
+  assert.match(todayMessage, /🕒 Оновлено о 12:00/);
+  assert.match(tomorrowMessage, /🕒 Оновлено о 14:30/);
+  assert.doesNotMatch(tomorrowMessage, /Оновлено о 12:00/);
+});
+
 test("daily totals follow the visible yellow treatment", () => {
   const visible = effectiveSchedule(state, true);
   const message = buildDayLightNotification(visible, null, "today");
