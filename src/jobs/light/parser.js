@@ -35,6 +35,14 @@ class PoeResponse {
 
   get updatedAt() {
     const details = this.dom.window.document.querySelector(".gpvinfodetail");
+    return this.updatedAtIn(details);
+  }
+
+  updatedAtForTable(table) {
+    return this.updatedAtIn(table?.closest(".gpvinfodetail")) || this.updatedAt;
+  }
+
+  updatedAtIn(details) {
     if (!details || !details.lastElementChild) {
       return null;
     }
@@ -190,6 +198,7 @@ function parseLightSchedule(html, queue, subQueue, options = {}) {
       totalTimeOff: todayParser.totalTimeOff
     },
     tomorrow: {
+      updatedAt: response.updatedAtForTable(response.tomorrowTable),
       timePeriods: tomorrowParser.timePeriods,
       totalTimeOn: tomorrowParser.totalTimeOn,
       totalTimeOff: tomorrowParser.totalTimeOff

@@ -123,7 +123,7 @@ function buildDayLightNotification(currentState, previousDay, day, options = {})
   }
   details.push(...formatPeriods(previousDay ? "" : dayLabel, currentDay.timePeriods));
   lines.push("", ...(previousDay ? expandableQuote(details) : details));
-  lines.push(...formatUpdatedAt(currentState));
+  lines.push(...formatUpdatedAt({ updatedAt: currentDay.updatedAt || currentState.updatedAt }));
   return lines.join("\n");
 }
 
