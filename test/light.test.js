@@ -307,6 +307,17 @@ test("light parser preserves xbar row offset and segment grouping", () => {
   assert.equal(schedule.today.totalTimeOff, 30);
 });
 
+test("light parser keeps the publication time of each day", () => {
+  const html = [
+    `<div class="gpvinfodetail"><table><tbody>${row([1])}</tbody></table><div>Оновлено: сьогодні 10:00</div></div>`,
+    `<div class="gpvinfodetail"><table><tbody>${row([2])}</tbody></table><div>Оновлено: завтра 14:30</div></div>`
+  ].join("");
+  const schedule = parseLightSchedule(html, 1, 1);
+
+  assert.equal(schedule.updatedAt, "Оновлено: сьогодні 10:00");
+  assert.equal(schedule.tomorrow.updatedAt, "Оновлено: завтра 14:30");
+});
+
 test("light parser reads the new POE horizontal grid and ignores its vertical duplicate", async () => {
   const html = await fs.readFile(path.join(__dirname, "fixtures/poe-new-layout.html"), "utf8");
   const schedule = parseLightSchedule(html, 1, 1, { now: new Date("2026-10-27T10:15:00") });
