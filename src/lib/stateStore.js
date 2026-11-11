@@ -12,8 +12,12 @@ async function readJsonFile(filePath) {
     const raw = await fs.readFile(filePath, "utf8");
     return JSON.parse(raw);
   } catch (error) {
-    if (error.code === "ENOENT" || error.name === "SyntaxError") {
+    if (error.code === "ENOENT") {
       return null;
+    }
+
+    if (error instanceof SyntaxError) {
+      throw new Error(`Invalid JSON in state file '${filePath}'`, { cause: error });
     }
 
     throw error;

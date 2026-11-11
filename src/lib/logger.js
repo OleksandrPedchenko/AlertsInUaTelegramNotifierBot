@@ -11,6 +11,16 @@ const DEFAULT_LOKI_APP_LABEL = "alerts-tg-bot";
 const DEFAULT_LOKI_TIMEOUT_MS = 2000;
 const MS_IN_DAY = 24 * 60 * 60 * 1000;
 
+function serializeError(error, depth = 0) {
+  return {
+    name: error.name,
+    message: error.message,
+    stack: error.stack,
+    ...(error.cause instanceof Error && depth < 3
+      ? { cause: serializeError(error.cause, depth + 1) } : {})
+  };
+}
+
 function normalizeMeta(meta) {
   if (!meta || typeof meta !== "object") {
     return {};
@@ -19,11 +29,7 @@ function normalizeMeta(meta) {
   const normalized = {};
   for (const [key, value] of Object.entries(meta)) {
     if (value instanceof Error) {
-      normalized[key] = {
-        name: value.name,
-        message: value.message,
-        stack: value.stack
-      };
+      normalized[key] = serializeError(value);
       continue;
     }
 

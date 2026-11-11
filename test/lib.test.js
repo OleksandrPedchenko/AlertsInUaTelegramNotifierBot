@@ -8,9 +8,10 @@ const test = require("node:test");
 const { requestWithRetry, HttpRequestError } = require("../src/lib/httpClient");
 const { acquireRunLock } = require("../src/lib/lock");
 const { createLoggerFromEnv } = require("../src/lib/logger");
+const { main: alertsMain } = require("../src/jobs/alerts/index");
 const { runPluginJob } = require("../src/lib/runner");
 const { readJobState, writeJobState } = require("../src/lib/stateStore");
-const { createSilentLogger, createTempDir, createTextResponse } = require("./helpers");
+const { createMemoryLogger, createSilentLogger, createTempDir, createTextResponse } = require("./helpers");
 
 test("lock acquisition skips overlapping runs and releases lock", async () => {
   const dir = await createTempDir();
@@ -27,13 +28,109 @@ test("lock acquisition skips overlapping runs and releases lock", async () => {
   await secondRelease();
 });
 
-test("state store reads missing and invalid files as empty and writes keyed state", async () => {
+test("dead process lock is removed so a later run can start", async () => {
+  const dir = await createTempDir();
+  const lockPath = path.join(dir, "job.lock");
+  await fs.writeFile(lockPath, "99999999");
+  const release = await acquireRunLock(lockPath);
+  assert.equal(typeof release, "function");
+  await release();
+  await assert.rejects(fs.stat(lockPath), { code: "ENOENT" });
+});
+
+test("concurrent stale-lock recovery grants only one run", async () => {
+  const dir = await createTempDir();
+  const lockPath = path.join(dir, "job.lock");
+  await fs.writeFile(lockPath, "99999999");
+  const originalOpen = fs.open;
+  const originalUnlink = fs.unlink;
+  let signalOpened;
+  const opened = new Promise(resolve => { signalOpened = resolve; });
+  let unlinks = 0;
+  const releases = [];
+  fs.open = async (...args) => {
+    const handle = await originalOpen(...args);
+    if (args[0] === lockPath && args[1] === "wx") signalOpened();
+    return handle;
+  };
+  fs.unlink = async (...args) => {
+    if (args[0] === lockPath && ++unlinks === 2) await opened;
+    return originalUnlink(...args);
+  };
+  try {
+    const results = await Promise.all([acquireRunLock(lockPath), acquireRunLock(lockPath)]);
+    releases.push(...results.filter(Boolean));
+    assert.equal(releases.length, 1);
+  } finally {
+    fs.open = originalOpen;
+    fs.unlink = originalUnlink;
+    for (const release of releases) await release().catch(() => undefined);
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("recovery guard stays held until the replacement lock is acquired", async () => {
+  const dir = await createTempDir();
+  const lockPath = path.join(dir, "job.lock");
+  await fs.writeFile(lockPath, "99999999");
+  const originalOpen = fs.open;
+  let lockAttempts = 0;
+  let guardHeld = false;
+  fs.open = async (...args) => {
+    if (args[0] === lockPath && args[1] === "wx" && ++lockAttempts === 2) {
+      await new Promise(resolve => setTimeout(resolve, 20));
+      guardHeld = Boolean(await fs.stat(`${lockPath}.recovery`).catch(() => null));
+    }
+    return originalOpen(...args);
+  };
+  let release;
+  try {
+    release = await acquireRunLock(lockPath);
+    assert.equal(typeof release, "function");
+    assert.equal(guardHeld, true);
+  } finally {
+    fs.open = originalOpen;
+    if (release) await release();
+  }
+});
+
+test("unreadable lock owner fails visibly instead of silently skipping forever", async () => {
+  const dir = await createTempDir();
+  const lockPath = path.join(dir, "job.lock");
+  await fs.writeFile(lockPath, "not-a-pid");
+  await assert.rejects(acquireRunLock(lockPath), /job.lock/);
+});
+
+test("stale recovery guard fails visibly instead of blocking runs silently", async () => {
+  const dir = await createTempDir();
+  const lockPath = path.join(dir, "job.lock");
+  const recoveryPath = `${lockPath}.recovery`;
+  await fs.writeFile(lockPath, "99999999");
+  await fs.writeFile(recoveryPath, "99999999");
+  const old = new Date(Date.now() - 10000);
+  await fs.utimes(recoveryPath, old, old);
+  await assert.rejects(acquireRunLock(lockPath), /recovery guard/);
+});
+
+test("live lock remains an expected overlap even if recovery guard is stale", async () => {
+  const dir = await createTempDir();
+  const lockPath = path.join(dir, "job.lock");
+  const release = await acquireRunLock(lockPath);
+  const recoveryPath = `${lockPath}.recovery`;
+  await fs.writeFile(recoveryPath, "99999999");
+  const old = new Date(Date.now() - 10000);
+  await fs.utimes(recoveryPath, old, old);
+  try {
+    assert.equal(await acquireRunLock(lockPath), null);
+  } finally {
+    await release();
+  }
+});
+
+test("state store reads missing files as empty and writes keyed state", async () => {
   const dir = await createTempDir();
   const statePath = path.join(dir, "state.json");
 
-  assert.equal(await readJobState(statePath, "job:key"), null);
-
-  await fs.writeFile(statePath, "{invalid json", "utf8");
   assert.equal(await readJobState(statePath, "job:key"), null);
 
   await writeJobState(statePath, "job:key", { value: "A" }, "fingerprint-A");
@@ -42,6 +139,36 @@ test("state store reads missing and invalid files as empty and writes keyed stat
   assert.equal(record.stateKey, "job:key");
   assert.equal(record.fingerprint, "fingerprint-A");
   assert.deepEqual(record.state, { value: "A" });
+});
+
+test("malformed state fails without overwriting the saved file", async () => {
+  const dir = await createTempDir();
+  const statePath = path.join(dir, "state.json");
+  await fs.writeFile(statePath, "{invalid json", "utf8");
+  await assert.rejects(readJobState(statePath, "job:key"), /state.json/);
+  await assert.rejects(writeJobState(statePath, "job:key", { value: "A" }, "A"), /state.json/);
+  assert.equal(await fs.readFile(statePath, "utf8"), "{invalid json");
+});
+
+test("alerts entrypoint logs corrupt state once with job and file context", async () => {
+  const dir = await createTempDir();
+  const statePath = path.join(dir, "state.json");
+  await fs.writeFile(statePath, "{invalid json");
+  const logger = createMemoryLogger();
+  const priorExitCode = process.exitCode;
+  try {
+    await alertsMain({ logger, config: {
+      job: { lockFilePath: path.join(dir, "job.lock"), stateFilePath: statePath },
+      api: { regionId: 1 }
+    } });
+    const errors = logger.entries.filter(entry => entry.level === "error");
+    assert.equal(errors.length, 1);
+    assert.equal(errors[0].meta.jobName, "alerts");
+    assert.match(errors[0].meta.error.message, /state.json/);
+    assert.equal(process.exitCode, 1);
+  } finally {
+    process.exitCode = priorExitCode;
+  }
 });
 
 test("runner skips notification when fingerprint is unchanged", async () => {
@@ -342,4 +469,23 @@ test("logger writes JSON lines to file and pushes buffered logs to Loki on flush
 
   await logger.flush();
   assert.equal(lokiPushes.length, 1);
+});
+
+test("ERROR log retains the underlying cause in the Loki payload", async () => {
+  const dir = await createTempDir();
+  const pushes = [];
+  const logger = createLoggerFromEnv({ LOG_FILE_PATH: path.join(dir, "app.log") }, {
+    consoleWriter: { log() {}, error() {} },
+    fetchImpl: async (_url, options) => {
+      pushes.push(JSON.parse(options.body));
+      return createTextResponse(204, "");
+    }
+  });
+  logger.error("Job failed", { jobName: "alerts", error: new Error("wrapper", { cause: new Error("disk full") }) });
+  await logger.flush();
+  const stream = pushes[0].streams[0];
+  assert.equal(stream.stream.level, "error");
+  assert.equal(stream.stream.job, "alerts");
+  const entry = JSON.parse(stream.values[0][1]);
+  assert.equal(entry.error.cause.message, "disk full");
 });

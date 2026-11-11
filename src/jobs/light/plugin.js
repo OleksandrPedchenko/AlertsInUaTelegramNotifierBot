@@ -47,6 +47,13 @@ async function readStubData(config) {
   }
 }
 
+function reportPinFailure(deps, stateKey, message, error) {
+  deps.reportedPinFailures ||= new Set();
+  if (deps.reportedPinFailures.has(stateKey)) return;
+  deps.reportedPinFailures.add(stateKey);
+  deps.logger.error(message, { jobName: "light", stateKey, error });
+}
+
 function normalizeScheduleForFingerprint(schedule) {
   schedule = effectiveSchedule(schedule, schedule.treatYellowAsGreen);
   return {
@@ -288,7 +295,7 @@ const lightPlugin = {
         notification, message, kind
       });
     } catch (error) {
-      deps.logger.warn("Could not remember today's schedule post for pinning", { reason: error.message });
+      reportPinFailure(deps, stateKey, "Could not remember today's schedule post for pinning", error);
     }
   },
 
@@ -296,7 +303,7 @@ const lightPlugin = {
     try {
       await syncTodayPin({ config, stateKey, currentState, deps });
     } catch (error) {
-      deps.logger.warn("Could not synchronize today's pinned schedule", { reason: error.message });
+      reportPinFailure(deps, stateKey, "Could not synchronize today's pinned schedule", error);
     }
   },
 

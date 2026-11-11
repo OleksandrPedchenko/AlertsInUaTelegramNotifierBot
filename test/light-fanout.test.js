@@ -6,12 +6,32 @@ const path = require("node:path");
 const test = require("node:test");
 const { createMockServer, createDefaultState, renderPoeHtml } = require("../src/jobs/light/mockServer");
 const { runFanout, loadSubscriptions } = require("../src/jobs/light/fanout");
-const { runLightJob } = require("../src/jobs/light/index");
+const { runLightJob, main: lightMain } = require("../src/jobs/light/index");
 const { loadLightConfig } = require("../src/jobs/light/config");
 const { createEnvReader } = require("../src/lib/config");
 const { readJobState, writeJobState } = require("../src/lib/stateStore");
+const { acquireRunLock } = require("../src/lib/lock");
 const { lightPlugin } = require("../src/jobs/light/plugin");
-const { createSilentLogger, createTempDir, createTextResponse } = require("./helpers");
+const { createMemoryLogger, createSilentLogger, createTempDir, createTextResponse } = require("./helpers");
+
+test("fan-out reports an overlapping run as a warning", async () => {
+  const dir = await createTempDir();
+  const subscriptionsFile = path.join(dir, "subscriptions.json");
+  const lockFilePath = path.join(dir, "light.lock");
+  await fs.writeFile(subscriptionsFile, JSON.stringify({ queues: { "1.1": { enabled: true, chatIds: ["chat"] } } }));
+  const release = await acquireRunLock(lockFilePath);
+  const logger = createMemoryLogger();
+  try {
+    const result = await runFanout({ TG_BOT_TOKEN: "token", LIGHT_SUBSCRIPTIONS_FILE: subscriptionsFile,
+      LIGHT_LOCK_FILE_PATH: lockFilePath, LIGHT_STATE_FILE_PATH: path.join(dir, "state.json") },
+    { cwd: dir, logger, fetchImpl: async () => { throw new Error("should not fetch"); } });
+    assert.equal(result.skipped, true);
+    assert.equal(logger.entries.filter(entry => entry.level === "warn").length, 1);
+    assert.equal(logger.entries.filter(entry => entry.level === "error").length, 0);
+  } finally {
+    await release();
+  }
+});
 
 test("fan-out fetches POE once and batches changed queues into one Gemini call", async () => {
   const dir = await createTempDir();
@@ -407,8 +427,20 @@ test("a failed group retries without resending successful groups", async () => {
     return fetch(url, options);
   };
   try {
-    await assert.rejects(runFanout(env, { fetchImpl, logger: createSilentLogger() }), /retry/);
-    assert.deepEqual(sent, ["good", "good", "retry"]);
+    const logger = createMemoryLogger();
+    await assert.rejects(runFanout(env, { fetchImpl, logger }), /retry/);
+    assert.equal(logger.entries.filter(entry => entry.level === "error").length, 1);
+    assert.equal(logger.entries.find(entry => entry.level === "error").meta.stateKey, "light:1.1:chat:retry");
+    logger.entries.length = 0;
+    const previousExitCode = process.exitCode;
+    try {
+      await lightMain({ config: loadLightConfig(env, createEnvReader(env, { cwd: dir })), fetchImpl, logger });
+      assert.equal(process.exitCode, 1);
+      assert.equal(logger.entries.filter(entry => entry.level === "error").length, 1);
+    } finally {
+      process.exitCode = previousExitCode;
+    }
+    assert.deepEqual(sent, ["good", "good", "retry", "retry"]);
     fail = false;
     sent.length = 0;
     await runFanout(env, { fetchImpl, logger: createSilentLogger() });
