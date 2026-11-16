@@ -10,6 +10,14 @@ const CHANNEL_URL = "https://t.me/s/poltavaOE";
 const ACTIVE_KEY = "light:gav:active-chats";
 
 function classify(text) {
+  if (/^СГАВ\s+(?:скасовано|відмінено)(?:!|\.|\s|$)/i.test(text) ||
+      /^О\s+\d{1,2}:\d{2}\s+(?:скасовано|відмінено)\s+СГАВ(?:!|\.|\s|$)/i.test(text)) {
+    return "sgav-cancelled";
+  }
+  if (/^О\s+\d{1,2}:\d{2}\s+застосовано\s+СГАВ(?:!|\.|\s|$)/i.test(text) ||
+      /^СГАВ\s+застосовано(?:!|\.|\s|$)/i.test(text)) {
+    return "sgav-applied";
+  }
   if (/^ГАВ\s+скасовано(?:!|\s|$)/i.test(text)) return "cancelled";
   if (/^В області застосовано ГАВ(?:!|\s|$)/i.test(text)) return "applied";
   return null;

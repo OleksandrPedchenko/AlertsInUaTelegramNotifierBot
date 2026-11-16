@@ -138,8 +138,13 @@ function buildOutageReminderNotification(currentState, reminder) {
 }
 
 function buildGavNotification(post) {
-  const headline = post.type === "cancelled" ? "🟢 ГАВ скасовано" : "🔴 В області застосовано ГАВ";
-  const detail = post.text.replace(/^(?:В області застосовано ГАВ|ГАВ скасовано)!?\s*/i, "").trim();
+  const headline = {
+    applied: "🔴 В області застосовано ГАВ",
+    cancelled: "🟢 ГАВ скасовано",
+    "sgav-applied": "🔴 В області застосовано СГАВ",
+    "sgav-cancelled": "🟢 СГАВ скасовано"
+  }[post.type];
+  const detail = post.text.replace(/^(?:В області застосовано ГАВ|ГАВ скасовано|СГАВ скасовано|СГАВ відмінено)!?\s*/i, "").trim();
   return [`<b>${headline}</b>`, "", escapeHtml(detail)].join("\n");
 }
 

@@ -73,7 +73,7 @@ test("editor saves valid changes and rejects cross-origin and stale edits", asyn
     assert.equal(page.status, 200);
     const html = await page.text();
     assert.match(html, /Save subscriptions/);
-    assert.match(html, /ГАВ alerts/);
+    assert.match(html, /ГАВ \/ СГАВ alerts/);
     const loaded = await (await fetch(`${base}/api/subscriptions`)).json();
     assert.equal(loaded.fields.gavNotifications.type, "boolean");
     assert.equal(loaded.document.queues["6.1"].chats[0].settings.gavNotifications, undefined);
