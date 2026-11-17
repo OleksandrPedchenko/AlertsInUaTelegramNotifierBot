@@ -5,7 +5,7 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const test = require("node:test");
 const { runFanout } = require("../src/jobs/light/fanout");
-const { classify } = require("../src/jobs/light/gav");
+const { classify, parsePosts } = require("../src/jobs/light/gav");
 const { createDefaultState, renderPoeHtml } = require("../src/jobs/light/mockServer");
 const { createSilentLogger, createTempDir, createTextResponse } = require("./helpers");
 
@@ -24,6 +24,22 @@ test("classifies SGAV operational notices without matching general coverage", ()
   assert.equal(classify("О 17:02 застосовано ГПВ."), null);
   assert.equal(classify("В області застосовано ГАВ!"), "applied");
   assert.equal(classify("ГАВ скасовано!"), "cancelled");
+});
+
+test("GAV parser keeps post order and decoded nested text while rejecting other channels", () => {
+  const html = `<div class="tgme_widget_message extra" data-post="poltavaOE/102">
+    <div class="tgme_widget_message_text">В області <b>застосовано</b> ГАВ!<br>О 13:00 &amp; далі</div>
+  </div><div class="tgme_widget_message" data-post="other/103">
+    <div class="tgme_widget_message_text">ГАВ скасовано!</div>
+  </div><div class="tgme_widget_message" data-post="poltavaOE/104">
+    <div class="tgme_widget_message_text"><span>ГАВ</span> скасовано!</div>
+  </div><div class="tgme_widget_message" data-post="poltavaOE/invalid">
+    <div class="tgme_widget_message_text">ГАВ скасовано!</div>
+  </div>`;
+  assert.deepEqual(parsePosts(html), [
+    { id: 102, text: "В області застосовано ГАВ!\nО 13:00 & далі", type: "applied" },
+    { id: 104, text: "ГАВ скасовано!", type: "cancelled" }
+  ]);
 });
 
 test("GAV polling baselines new chats, sends new posts once, and retries failed destinations", async () => {

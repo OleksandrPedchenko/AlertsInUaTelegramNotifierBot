@@ -1,6 +1,6 @@
 "use strict";
 
-const { JSDOM } = require("jsdom");
+const { parse } = require("parse5");
 const { requestWithRetry } = require("../../lib/httpClient");
 const { readJobState, writeJobState } = require("../../lib/stateStore");
 const { sendTelegramMessage } = require("../../lib/telegramNotifier");
@@ -24,14 +24,33 @@ function classify(text) {
 }
 
 function parsePosts(html) {
-  const document = new JSDOM(html).window.document;
-  return [...document.querySelectorAll(".tgme_widget_message[data-post]")].map(post => {
-    const id = Number(/^poltavaOE\/(\d+)$/.exec(post.getAttribute("data-post"))?.[1]);
-    const content = post.querySelector(".tgme_widget_message_text")?.cloneNode(true);
-    if (content) for (const br of content.querySelectorAll("br")) br.replaceWith(document.createTextNode("\n"));
-    const text = content?.textContent?.trim() || "";
-    return { id, text, type: classify(text) };
-  }).filter(post => Number.isSafeInteger(post.id) && post.id > 0);
+  const attribute = (node, name) => node.attrs?.find(item => item.name === name)?.value;
+  const hasClass = (node, name) => attribute(node, "class")?.split(/\s+/).includes(name);
+  const children = node => node.childNodes || [];
+  const find = (node, predicate) => {
+    for (const child of children(node)) {
+      if (predicate(child)) return child;
+      const match = find(child, predicate);
+      if (match) return match;
+    }
+    return null;
+  };
+  const textContent = node => node.nodeName === "#text" ? node.value
+    : node.tagName === "br" ? "\n" : children(node).map(textContent).join("");
+  const posts = [];
+  const visit = node => {
+    if (hasClass(node, "tgme_widget_message") && attribute(node, "data-post") !== undefined) {
+      const id = Number(/^poltavaOE\/(\d+)$/.exec(attribute(node, "data-post"))?.[1]);
+      if (Number.isSafeInteger(id) && id > 0) {
+        const content = find(node, child => hasClass(child, "tgme_widget_message_text"));
+        const text = content ? textContent(content).trim() : "";
+        posts.push({ id, text, type: classify(text) });
+      }
+    }
+    for (const child of children(node)) visit(child);
+  };
+  visit(parse(html));
+  return posts;
 }
 
 async function fetchPosts(after, config, deps) {
