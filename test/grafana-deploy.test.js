@@ -20,6 +20,14 @@ test("dashboard queries include both deployed app labels", () => {
   }
 });
 
+test("p95 panels group raw runs before calculating the percentile", () => {
+  const dashboard = require("../grafana/performance-dashboard.json");
+  const panel = title => dashboard.panels.find(item => item.title === title);
+  assert.match(panel("p95 CPU").targets[0].expr, /quantile_over_time\(0\.95,.*\) by \(\)/);
+  assert.match(panel("Maximum and p95 CPU by job").targets[1].expr, /quantile_over_time\(0\.95,.*\) by \(job\)/);
+  assert.match(panel("p95 \/ maximum CPU").targets[0].expr, /quantile_over_time\(0\.95,.*\) by \(\)/);
+});
+
 test("dashboard deploy uses existing Loki, reuses UID, and validates every panel query", async () => {
   let saved;
   let queries = 0;

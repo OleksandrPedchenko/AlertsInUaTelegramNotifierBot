@@ -255,8 +255,8 @@
     {
       "id": 6,
       "type": "stat",
-      "title": "Worst job p95 CPU",
-      "description": "Highest per-job p95; Loki calculates quantiles within each job stream.",
+      "title": "p95 CPU",
+      "description": "95th percentile across the selected jobs and executions.",
       "datasource": {
         "type": "loki",
         "uid": "${DS_LOKI}"
@@ -270,7 +270,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "max(quantile_over_time(0.95,{app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | unwrap cpuMs | __error__=\"\"[$__range]))",
+          "expr": "quantile_over_time(0.95,{app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | unwrap cpuMs | __error__=\"\"[$__range]) by ()",
           "queryType": "instant",
           "legendFormat": "p95"
         }
@@ -444,7 +444,7 @@
         },
         {
           "refId": "B",
-          "expr": "max by (job) (quantile_over_time(0.95,{app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | unwrap cpuMs | __error__=\"\"[$__interval]))",
+          "expr": "quantile_over_time(0.95,{app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | unwrap cpuMs | __error__=\"\"[$__interval]) by (job)",
           "queryType": "range",
           "legendFormat": "p95 {{job}}"
         }
@@ -889,7 +889,7 @@
       "id": 26,
       "type": "stat",
       "title": "p95 / maximum CPU",
-      "description": "p95 is the highest per-job p95; maximum is across all jobs.",
+      "description": "p95 and maximum across the selected jobs and executions.",
       "datasource": {
         "type": "loki",
         "uid": "${DS_LOKI}"
@@ -903,7 +903,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "max(quantile_over_time(0.95,{app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | unwrap cpuMs | __error__=\"\"[$__range]))",
+          "expr": "quantile_over_time(0.95,{app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | unwrap cpuMs | __error__=\"\"[$__range]) by ()",
           "queryType": "instant",
           "legendFormat": "p95"
         },
