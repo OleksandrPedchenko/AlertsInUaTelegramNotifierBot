@@ -233,6 +233,7 @@ test("runner flushes owned logger to Loki after job finishes", async () => {
 
 test("HTTP retry retries retriable status and returns success", async () => {
   let calls = 0;
+  const phases = [];
   const response = await requestWithRetry({
     url: "https://example.test",
     maxRetries: 1,
@@ -246,11 +247,16 @@ test("HTTP retry retries retriable status and returns success", async () => {
 
       return createTextResponse(200, "ok");
     },
+    measurePhase: async (name, operation) => {
+      phases.push(name);
+      return operation();
+    },
     logger: createSilentLogger()
   });
 
   assert.equal(calls, 2);
   assert.equal(response.body, "ok");
+  assert.deepEqual(phases, ["fetch_headers", "read_body", "fetch_headers", "read_body"]);
 });
 
 test("HTTP retry does not retry non-retriable status", async () => {

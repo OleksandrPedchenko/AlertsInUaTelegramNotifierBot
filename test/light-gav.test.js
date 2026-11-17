@@ -5,9 +5,10 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const test = require("node:test");
 const { runFanout } = require("../src/jobs/light/fanout");
-const { classify } = require("../src/jobs/light/gav");
+const { classify, processGav } = require("../src/jobs/light/gav");
+const { createPerformance } = require("../src/lib/performance");
 const { createDefaultState, renderPoeHtml } = require("../src/jobs/light/mockServer");
-const { createSilentLogger, createTempDir, createTextResponse } = require("./helpers");
+const { createMemoryLogger, createSilentLogger, createTempDir, createTextResponse } = require("./helpers");
 
 function channelHtml(posts) {
   return `<html><body>${posts.map(([id, text]) =>
@@ -24,6 +25,22 @@ test("classifies SGAV operational notices without matching general coverage", ()
   assert.equal(classify("О 17:02 застосовано ГПВ."), null);
   assert.equal(classify("В області застосовано ГАВ!"), "applied");
   assert.equal(classify("ГАВ скасовано!"), "cancelled");
+});
+
+test("GAV polling measures headers, body reading, and HTML parsing separately", async () => {
+  const dir = await createTempDir();
+  const logger = createMemoryLogger();
+  const performance = createPerformance("light", logger);
+  const sent = await processGav([{ chatId: "a", settings: { gavNotifications: true } }], {
+    job: { stateFilePath: path.join(dir, "state.json") },
+    telegram: { timeoutMs: 1000, maxRetries: 0, retryBaseDelayMs: 1 }
+  }, {
+    logger, performance,
+    fetchImpl: async () => createTextResponse(200, channelHtml([[100, "Оновлено графік"]]))
+  });
+  assert.equal(sent, 0);
+  assert.deepEqual(logger.entries.filter(entry => entry.meta?.event === "job_phase_performance")
+    .map(entry => entry.meta.phase), ["gav_fetch_headers", "gav_read_body", "gav_parse_html"]);
 });
 
 test("GAV polling baselines new chats, sends new posts once, and retries failed destinations", async () => {
