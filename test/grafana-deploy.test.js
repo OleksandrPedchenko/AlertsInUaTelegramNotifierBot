@@ -9,6 +9,17 @@ const test = require("node:test");
 
 const execute = promisify(execFile);
 
+test("dashboard queries include both deployed app labels", () => {
+  const dashboard = require("../grafana/performance-dashboard.json");
+  const targets = dashboard.panels.flatMap(panel => panel.targets || []);
+  assert.ok(targets.length > 0);
+  for (const target of targets) {
+    if (target.expr.includes("{app")) {
+      assert.match(target.expr, /app=~"alerts-tg-bot\|poe-notifier"/);
+    }
+  }
+});
+
 test("dashboard deploy uses existing Loki, reuses UID, and validates every panel query", async () => {
   let saved;
   let queries = 0;

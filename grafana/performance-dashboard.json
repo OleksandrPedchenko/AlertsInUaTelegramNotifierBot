@@ -98,7 +98,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(count_over_time({app=\"alerts-tg-bot\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | __error__=\"\"[$__range]))",
+          "expr": "sum(count_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | __error__=\"\"[$__range]))",
           "queryType": "instant",
           "legendFormat": "Total"
         }
@@ -141,7 +141,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (status) (count_over_time({app=\"alerts-tg-bot\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | __error__=\"\"[$__range]))",
+          "expr": "sum by (status) (count_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | __error__=\"\"[$__range]))",
           "queryType": "instant",
           "legendFormat": "{{status}}"
         }
@@ -184,7 +184,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(sum_over_time({app=\"alerts-tg-bot\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | unwrap cpuMs | __error__=\"\" [$__range])) / sum(count_over_time({app=\"alerts-tg-bot\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | __error__=\"\" [$__range]))",
+          "expr": "sum(sum_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | unwrap cpuMs | __error__=\"\" [$__range])) / sum(count_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | __error__=\"\" [$__range]))",
           "queryType": "instant",
           "legendFormat": "Average"
         }
@@ -227,7 +227,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "max(max_over_time({app=\"alerts-tg-bot\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | unwrap cpuMs | __error__=\"\"[$__range]))",
+          "expr": "max(max_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | unwrap cpuMs | __error__=\"\"[$__range]))",
           "queryType": "instant",
           "legendFormat": "Maximum"
         }
@@ -270,7 +270,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "max(quantile_over_time(0.95,{app=\"alerts-tg-bot\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | unwrap cpuMs | __error__=\"\"[$__range]))",
+          "expr": "max(quantile_over_time(0.95,{app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | unwrap cpuMs | __error__=\"\"[$__range]))",
           "queryType": "instant",
           "legendFormat": "p95"
         }
@@ -313,13 +313,13 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(sum_over_time({app=\"alerts-tg-bot\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | unwrap wallMs | __error__=\"\" [$__range])) / sum(count_over_time({app=\"alerts-tg-bot\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | __error__=\"\" [$__range]))",
+          "expr": "sum(sum_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | unwrap wallMs | __error__=\"\" [$__range])) / sum(count_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | __error__=\"\" [$__range]))",
           "queryType": "instant",
           "legendFormat": "Average"
         },
         {
           "refId": "B",
-          "expr": "max(max_over_time({app=\"alerts-tg-bot\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | unwrap wallMs | __error__=\"\"[$__range]))",
+          "expr": "max(max_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | unwrap wallMs | __error__=\"\"[$__range]))",
           "queryType": "instant",
           "legendFormat": "Maximum"
         }
@@ -374,7 +374,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "last_over_time({app=\"alerts-tg-bot\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | unwrap cpuMs | __error__=\"\"[$__interval])",
+          "expr": "last_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | unwrap cpuMs | __error__=\"\"[$__interval])",
           "queryType": "range",
           "legendFormat": "{{job}}"
         }
@@ -406,7 +406,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "avg by (job) (avg_over_time({app=\"alerts-tg-bot\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | unwrap cpuMs | __error__=\"\"[$__interval]))",
+          "expr": "avg by (job) (avg_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | unwrap cpuMs | __error__=\"\"[$__interval]))",
           "queryType": "range",
           "legendFormat": "{{job}}"
         }
@@ -438,13 +438,13 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "max by (job) (max_over_time({app=\"alerts-tg-bot\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | unwrap cpuMs | __error__=\"\"[$__interval]))",
+          "expr": "max by (job) (max_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | unwrap cpuMs | __error__=\"\"[$__interval]))",
           "queryType": "range",
           "legendFormat": "max {{job}}"
         },
         {
           "refId": "B",
-          "expr": "max by (job) (quantile_over_time(0.95,{app=\"alerts-tg-bot\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | unwrap cpuMs | __error__=\"\"[$__interval]))",
+          "expr": "max by (job) (quantile_over_time(0.95,{app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | unwrap cpuMs | __error__=\"\"[$__interval]))",
           "queryType": "range",
           "legendFormat": "p95 {{job}}"
         }
@@ -488,7 +488,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "avg by (phase) (avg_over_time({app=\"alerts-tg-bot\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_phase_performance\" | unwrap cpuMs | __error__=\"\"[$__range]))",
+          "expr": "avg by (phase) (avg_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_phase_performance\" | unwrap cpuMs | __error__=\"\"[$__range]))",
           "queryType": "instant",
           "legendFormat": "{{phase}}"
         }
@@ -520,7 +520,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "max by (phase) (max_over_time({app=\"alerts-tg-bot\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_phase_performance\" | unwrap cpuMs | __error__=\"\"[$__range]))",
+          "expr": "max by (phase) (max_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_phase_performance\" | unwrap cpuMs | __error__=\"\"[$__range]))",
           "queryType": "instant",
           "legendFormat": "{{phase}}"
         }
@@ -552,7 +552,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "avg by (phase) (avg_over_time({app=\"alerts-tg-bot\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_phase_performance\" | unwrap cpuMs | __error__=\"\"[$__interval]))",
+          "expr": "avg by (phase) (avg_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_phase_performance\" | unwrap cpuMs | __error__=\"\"[$__interval]))",
           "queryType": "range",
           "legendFormat": "{{phase}}"
         }
@@ -584,7 +584,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "avg by (phase) (avg_over_time({app=\"alerts-tg-bot\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_phase_performance\" | unwrap wallMs | __error__=\"\"[$__interval]))",
+          "expr": "avg by (phase) (avg_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_phase_performance\" | unwrap wallMs | __error__=\"\"[$__interval]))",
           "queryType": "range",
           "legendFormat": "{{phase}}"
         }
@@ -628,7 +628,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (notified) (count_over_time({app=\"alerts-tg-bot\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | __error__=\"\"[$__interval]))",
+          "expr": "sum by (notified) (count_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | __error__=\"\"[$__interval]))",
           "queryType": "range",
           "legendFormat": "notified={{notified}}"
         }
@@ -660,7 +660,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (imageGenerated) (count_over_time({app=\"alerts-tg-bot\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | __error__=\"\"[$__interval]))",
+          "expr": "sum by (imageGenerated) (count_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | __error__=\"\"[$__interval]))",
           "queryType": "range",
           "legendFormat": "image={{imageGenerated}}"
         }
@@ -692,7 +692,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (status) (count_over_time({app=\"alerts-tg-bot\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | __error__=\"\" | status=~\"failure|skipped\" [$__interval]))",
+          "expr": "sum by (status) (count_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | __error__=\"\" | status=~\"failure|skipped\" [$__interval]))",
           "queryType": "range",
           "legendFormat": "{{status}}"
         }
@@ -724,13 +724,13 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(count_over_time({app=\"alerts-tg-bot\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | __error__=\"\"[$__interval]))",
+          "expr": "sum(count_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | __error__=\"\"[$__interval]))",
           "queryType": "range",
           "legendFormat": "Executions"
         },
         {
           "refId": "B",
-          "expr": "sum(sum_over_time({app=\"alerts-tg-bot\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | unwrap notificationCount | __error__=\"\"[$__interval]))",
+          "expr": "sum(sum_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | unwrap notificationCount | __error__=\"\"[$__interval]))",
           "queryType": "range",
           "legendFormat": "Notifications"
         }
@@ -817,7 +817,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(count_over_time({app=\"alerts-tg-bot\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | __error__=\"\" | cpuMs > ${cpu_threshold_ms} [$__range]))",
+          "expr": "sum(count_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | __error__=\"\" | cpuMs > ${cpu_threshold_ms} [$__range]))",
           "queryType": "instant",
           "legendFormat": "Count"
         }
@@ -860,7 +860,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "100 * sum(count_over_time({app=\"alerts-tg-bot\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | __error__=\"\" | cpuMs > ${cpu_threshold_ms} [$__range])) / sum(count_over_time({app=\"alerts-tg-bot\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | __error__=\"\"[$__range]))",
+          "expr": "100 * sum(count_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | __error__=\"\" | cpuMs > ${cpu_threshold_ms} [$__range])) / sum(count_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | __error__=\"\"[$__range]))",
           "queryType": "instant",
           "legendFormat": "Percent"
         }
@@ -903,13 +903,13 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "max(quantile_over_time(0.95,{app=\"alerts-tg-bot\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | unwrap cpuMs | __error__=\"\"[$__range]))",
+          "expr": "max(quantile_over_time(0.95,{app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | unwrap cpuMs | __error__=\"\"[$__range]))",
           "queryType": "instant",
           "legendFormat": "p95"
         },
         {
           "refId": "B",
-          "expr": "max(max_over_time({app=\"alerts-tg-bot\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | unwrap cpuMs | __error__=\"\"[$__range]))",
+          "expr": "max(max_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | unwrap cpuMs | __error__=\"\"[$__range]))",
           "queryType": "instant",
           "legendFormat": "Maximum"
         }
@@ -952,7 +952,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "max by (phase) (max_over_time({app=\"alerts-tg-bot\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_phase_performance\" | unwrap cpuMs | __error__=\"\"[$__range]))",
+          "expr": "max by (phase) (max_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_phase_performance\" | unwrap cpuMs | __error__=\"\"[$__range]))",
           "queryType": "instant",
           "legendFormat": "{{phase}}"
         }
@@ -996,7 +996,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "{app=\"alerts-tg-bot\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | __error__=\"\" | runId=~\".*${run_id}.*\"",
+          "expr": "{app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | __error__=\"\" | runId=~\".*${run_id}.*\"",
           "queryType": "range",
           "legendFormat": ""
         }
@@ -1035,7 +1035,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "{app=\"alerts-tg-bot\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_phase_performance\" | __error__=\"\" | runId=~\".*${run_id}.*\"",
+          "expr": "{app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_phase_performance\" | __error__=\"\" | runId=~\".*${run_id}.*\"",
           "queryType": "range",
           "legendFormat": ""
         }
