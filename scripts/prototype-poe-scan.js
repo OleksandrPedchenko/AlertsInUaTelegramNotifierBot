@@ -1,56 +1,22 @@
 "use strict";
 
-// Experimental fast path for the current POE horizontal grid. It does not change the job.
+// Compare the production fast path with the existing DOM fallback.
 const assert = require("node:assert/strict");
 const { readFile } = require("node:fs/promises");
 const { PoeResponse, parseLightSchedule } = require("../src/jobs/light/parser");
+const { scanPoeSchedule } = require("../src/jobs/light/poeFastScan");
 
 const POE_URL = "https://www.poe.pl.ua/customs/dynamicgpv-info.php";
-const TABLE = /<table\b[^>]*class="[^"]*\bgpv-table\b[^"]*"[^>]*>[\s\S]*?<\/table>/g;
-const ROW = /<tr\b[^>]*>([\s\S]*?)<\/tr>/g;
-const CELL = /<td\b([^>]*)>([\s\S]*?)<\/td>/g;
-
-function sections(html) {
-  const starts = [...html.matchAll(/<div\b[^>]*class="[^"]*\bgpvinfodetail\b[^"]*"[^>]*>/g)]
-    .map(match => match.index);
-  return starts.map((start, index) => html.slice(start, starts[index + 1] ?? html.length));
-}
 
 function extract(html) {
-  const days = sections(html).map(section => {
-    const table = section.match(TABLE)?.[0];
-    if (!table) throw new Error("POE horizontal schedule table is missing");
-    const body = /<tbody\b[^>]*>([\s\S]*?)<\/tbody>/.exec(table)?.[1];
-    if (!body) throw new Error("POE horizontal schedule body is missing");
-    const rows = [...body.matchAll(ROW)].map(([, row]) => {
-      const cells = [...row.matchAll(CELL)];
-      const queueKey = cells[0]?.[2].replace(/<[^>]*>/g, "").trim();
-      const states = cells.slice(1).map(([, attributes]) => {
-        const names = /\bclass="([^"]*)"/.exec(attributes)?.[1] || "";
-        const status = /(?:^|\s)gpv-s([123])(?:\s|$)/.exec(names)?.[1];
-        if (!status) throw new Error(`Missing status in queue ${queueKey}`);
-        return Number(status);
-      });
-      if (!/^([1-6])\.([12])$/.test(queueKey) || states.length !== 48) {
-        throw new Error(`Invalid POE schedule row ${queueKey}: ${states.length} periods`);
-      }
-      return { queueKey, states };
-    });
-    if (!rows.length || rows.length > 12 || new Set(rows.map(row => row.queueKey)).size !== rows.length) {
-      throw new Error("Invalid POE schedule rows");
-    }
-    const updates = [...section.matchAll(/<div\b[^>]*>\s*(Оновлено:[^<]*)<\/div>/g)];
-    const updatedAt = updates.at(-1)?.[1].trim();
-    if (!updatedAt) throw new Error("POE publication time is missing");
-    return { table, rows, updatedAt };
-  });
-  if (!days.length || days.length > 2) throw new Error(`Unexpected POE day count: ${days.length}`);
-  return days;
+  const result = scanPoeSchedule(html);
+  if (!result) throw new Error("POE fast scan rejected this layout");
+  return result.days;
 }
 
 function compactHtml(html) {
   return extract(html).map(day =>
-    `<div class="gpvinfodetail">${day.table}<div>${day.updatedAt}</div></div>`
+    `<div class="gpvinfodetail">${day.tableHtml}<div>${day.updatedAt}</div></div>`
   ).join("");
 }
 
@@ -76,14 +42,18 @@ async function main() {
     : await (await fetch(POE_URL, { headers: { "User-Agent": "alerts-tg-bot/1.0" } })).text();
   const days = extract(html);
   const compact = compactHtml(html);
+  const fallbackFull = html.replaceAll('class="gpvinfodetail"', "class='gpvinfodetail'");
+  const fallbackCompact = compact.replaceAll('class="gpvinfodetail"', "class='gpvinfodetail'");
   const fullResponse = new PoeResponse(html);
   const compactResponse = new PoeResponse(compact);
+  const fallbackResponse = new PoeResponse(fallbackFull);
+  assert.equal(fallbackResponse.fastScan, null);
   const now = new Date("2026-11-17T17:00:00Z");
   const queueKeys = days[0].rows.map(row => row.queueKey);
   for (const key of queueKeys) {
     const [queue, subQueue] = key.split(".").map(Number);
     assert.deepEqual(parseLightSchedule(compactResponse, queue, subQueue, { now }),
-      parseLightSchedule(fullResponse, queue, subQueue, { now }));
+      parseLightSchedule(fallbackResponse, queue, subQueue, { now }));
     for (let day = 0; day < days.length; day += 1) {
       const periods = (day ? "tomorrow" : "today");
       const schedule = parseLightSchedule(fullResponse, queue, subQueue, { now })[periods];
@@ -106,8 +76,9 @@ async function main() {
     days: days.length,
     queuesCompared: queueKeys.length,
     medianCpuMs: {
-      fullTree: benchmark(() => parseThree(html)),
-      tableTree: benchmark(() => parseThree(compact)),
+      fullTree: benchmark(() => parseThree(fallbackFull)),
+      tableTree: benchmark(() => parseThree(fallbackCompact)),
+      fastSchedule: benchmark(() => parseThree(html)),
       statusScan: benchmark(() => extract(html), 100)
     }
   }, null, 2));

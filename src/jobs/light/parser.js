@@ -1,6 +1,7 @@
 "use strict";
 
 const { parse } = require("parse5");
+const { scanPoeSchedule } = require("./poeFastScan");
 
 const children = node => node?.childNodes || [];
 const classes = node => node?.attrs?.find(attribute => attribute.name === "class")?.value.split(/\s+/) || [];
@@ -40,7 +41,12 @@ const STATUS_LABELS = Object.freeze({
 class PoeResponse {
   constructor(data) {
     this.$data = data;
-    this.dom = parse(data);
+    this.fastScan = scanPoeSchedule(data);
+    if (!this.fastScan) this.parseDom();
+  }
+
+  parseDom() {
+    this.dom = parse(this.$data);
     this.tables = descendants(this.dom, node => node.tagName === "tbody")
       .filter(body => !closest(body, node => node.tagName === "table" && classes(node).includes("gpv-vtable")));
   }
@@ -54,10 +60,12 @@ class PoeResponse {
   }
 
   getTable(index = 0) {
+    if (!this.dom) this.parseDom();
     return this.tables[index] || null;
   }
 
   get updatedAt() {
+    if (this.fastScan) return this.fastScan.days[0].updatedAt;
     const details = descendants(this.dom, node => classes(node).includes("gpvinfodetail"))[0];
     return this.updatedAtIn(details);
   }
@@ -81,6 +89,8 @@ class Parser {
     this.queue = queue;
     this.subQueue = subQueue;
     this.now = options.now || new Date();
+    this.states = options.states;
+    if (this.states) return;
     const index = (this.queue - 1) * 2 + (this.subQueue - 1);
     this.table = table;
     const row = table ? descendants(table, node => node.tagName === "tr")[index] : null;
@@ -90,7 +100,7 @@ class Parser {
   get segments() {
     const labelCells = closest(this.table, node => node.tagName === "table" && classes(node).includes("gpv-table"))
       ? 1 : (this.subQueue === 1 ? 2 : 1);
-    const array = Array.from(this.elements)
+    const array = this.states || Array.from(this.elements)
       .slice(labelCells)
       .map((element) =>
         Number(
@@ -198,6 +208,26 @@ function allDayLight() {
 
 function parseLightSchedule(html, queue, subQueue, options = {}) {
   const response = html instanceof PoeResponse ? html : new PoeResponse(html);
+  if (response.fastScan) {
+    const index = (queue - 1) * 2 + (subQueue - 1);
+    const [today, tomorrow] = response.fastScan.days;
+    const states = today.rows[index]?.states;
+    if (!states) throw new Error(`POE schedule row ${queue}.${subQueue} is missing or invalid`);
+    const schedule = values => {
+      const parser = new Parser(null, queue, subQueue, { ...options, states: values });
+      return {
+        timePeriods: parser.timePeriods,
+        totalTimeOn: parser.totalTimeOn,
+        totalTimeOff: parser.totalTimeOff
+      };
+    };
+    return {
+      queue, subQueue, updatedAt: today.updatedAt,
+      today: schedule(states),
+      tomorrow: { updatedAt: tomorrow?.updatedAt || today.updatedAt,
+        ...schedule(tomorrow?.rows[index]?.states || []) }
+    };
+  }
   const todayParser = new Parser(response.todayTable, queue, subQueue, options);
   const tomorrowParser = new Parser(response.tomorrowTable, queue, subQueue, options);
 
