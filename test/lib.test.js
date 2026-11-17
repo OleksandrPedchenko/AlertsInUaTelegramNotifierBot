@@ -225,7 +225,10 @@ test("runner flushes owned logger to Loki after job finishes", async () => {
   assert.equal(payload.streams[0].stream.app, "alerts-tg-bot");
   assert.equal(payload.streams[0].stream.level, "info");
   assert.equal(payload.streams[0].stream.job, "demo");
-  assert.equal(payload.streams[0].values.length, 2);
+  const events = payload.streams[0].values.map(([, line]) => JSON.parse(line));
+  assert.equal(events.filter(entry => entry.event === "job_performance").length, 1);
+  assert.ok(events.filter(entry => entry.event === "job_phase_performance").length >= 2);
+  assert.equal(events.find(entry => entry.event === "job_performance").status, "success");
 });
 
 test("HTTP retry retries retriable status and returns success", async () => {

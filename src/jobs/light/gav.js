@@ -93,6 +93,7 @@ async function processGav(subscriptions, config, deps) {
           const waitMs = 1100 - (Date.now() - (deps.lastSentAt?.get(chatId) || 0));
           if (waitMs > 0) await new Promise(resolve => setTimeout(resolve, waitMs));
           await sendTelegramMessage(buildGavNotification(post), { ...config.telegram, chatId }, deps);
+          deps.performance?.addNotifications(1);
           deps.lastSentAt?.set(chatId, Date.now());
           sent += 1;
         }

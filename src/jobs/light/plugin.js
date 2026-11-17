@@ -245,9 +245,9 @@ const lightPlugin = {
       useStub: config.job.useStub
     });
 
-    const response = config.job.useStub
-      ? await readStubData(config)
-      : await fetchPoeData(config, deps);
+    const response = await deps.performance.phase("fetch_http", () => config.job.useStub
+      ? readStubData(config)
+      : fetchPoeData(config, deps));
 
     if (config.job.useStub) {
       deps.logger.warn("Light stub mode enabled. External POE requests skipped", {
@@ -257,9 +257,9 @@ const lightPlugin = {
 
     const currentMinute = Number.isInteger(config.job.currentMinute)
       ? config.job.currentMinute : getCurrentMinute();
-    const schedule = parseLightSchedule(response.html, config.poe.queue, config.poe.subQueue, {
+    const schedule = deps.performance.phaseSync("parse_html", () => parseLightSchedule(response.html, config.poe.queue, config.poe.subQueue, {
       now: dateFromCurrentMinute(currentMinute)
-    });
+    }));
     const currentState = buildCurrentLightState(schedule, config, deps.previousState, response);
 
     deps.logger.info("Light data fetched successfully", {
@@ -380,13 +380,16 @@ const lightPlugin = {
           today: previousScheduleForDay(previousState, currentState, "today") || { timePeriods: [] },
           tomorrow: previousScheduleForDay(previousState, currentState, "tomorrow") || { timePeriods: [] }
         };
-        summaries[firstDay] = await describeLightScheduleChange(
+        summaries[firstDay] = await (deps.performance?.phase("gemini_processing", () => describeLightScheduleChange(
           config.gemini,
           effectiveSchedule(priorForPrompt, currentState.treatYellowAsGreen),
           visibleState,
           deps,
           firstDay
-        );
+        )) ?? describeLightScheduleChange(
+          config.gemini, effectiveSchedule(priorForPrompt, currentState.treatYellowAsGreen),
+          visibleState, deps, firstDay
+        ));
 
         if (summaries[firstDay]) {
           deps.logger.info("Gemini change summary generated", {
@@ -458,11 +461,13 @@ const lightPlugin = {
         try {
           const renderImage = config.job.scheduleImageLayout === "vertical"
             ? renderVerticalScheduleImage : renderScheduleImage;
-          notification.photo = await renderImage({
+          const image = () => renderImage({
             queue: currentState.queue, subQueue: currentState.subQueue,
             day, previous, current,
             scheduleDate: currentState.scheduleDate
           });
+          notification.photo = await (deps.performance?.phase("render_image", image) ?? image());
+          deps.performance?.markImage();
         } catch (error) {
           deps.logger.warn("Schedule image rendering failed; sending text schedule", {
             queue: currentState.queue, subQueue: currentState.subQueue, day, reason: error.message
