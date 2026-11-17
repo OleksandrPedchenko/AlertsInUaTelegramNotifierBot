@@ -64,9 +64,13 @@ async function fetchPosts(after, config, deps) {
       maxRetries: config.telegram.maxRetries,
       retryBaseDelayMs: config.telegram.retryBaseDelayMs,
       fetchImpl: deps.fetchImpl,
+      measurePhase: (name, operation) => deps.performance
+        ? deps.performance.phase(`gav_${name}`, operation) : operation(),
       logger: deps.logger
     });
-    const posts = parsePosts(response.body);
+    const posts = deps.performance
+      ? deps.performance.phaseSync("gav_parse_html", () => parsePosts(response.body))
+      : parsePosts(response.body);
     if (!posts.length) throw new Error("POE Telegram channel returned no readable posts");
     if (latestId === undefined) latestId = Math.max(...posts.map(post => post.id));
     for (const post of posts) if (post.id > after) found.set(post.id, post);
