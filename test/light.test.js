@@ -13,7 +13,7 @@ const { loadLightConfig } = require("../src/jobs/light/config");
 const { effectiveSchedule } = require("../src/jobs/light/effectiveSchedule");
 const { buildGeminiPrompt, changedWindowsForPrompt, trimPeriodsForPrompt } = require("../src/jobs/light/geminiClient");
 const { createDefaultState, createMockServer, renderPoeHtml } = require("../src/jobs/light/mockServer");
-const { parseLightSchedule } = require("../src/jobs/light/parser");
+const { PoeResponse, parseLightSchedule } = require("../src/jobs/light/parser");
 const { findPendingOutageReminder, getChangedDays, getRelevantChangedDays, lightPlugin, previousScheduleForDay } = require("../src/jobs/light/plugin");
 const { createMemoryLogger, createSilentLogger, createTempDir, createTextResponse } = require("./helpers");
 
@@ -345,6 +345,18 @@ test("light parser rejects HTML without the selected schedule row", () => {
     () => parseLightSchedule("<html><body>Service unavailable</body></html>", 2, 2),
     /schedule/i
   );
+});
+
+test("light parser reuses one parsed POE response for multiple queues", () => {
+  const html = renderPoeHtml(createDefaultState());
+  const response = new PoeResponse(html);
+  const now = new Date("2026-11-17T17:00:00Z");
+  for (const [queue, subQueue] of [[1, 1], [2, 2], [3, 1]]) {
+    assert.deepEqual(
+      parseLightSchedule(response, queue, subQueue, { now }),
+      parseLightSchedule(html, queue, subQueue, { now })
+    );
+  }
 });
 
 test("light parser treats an explicit table-free POE no-schedule response as all-day light", () => {

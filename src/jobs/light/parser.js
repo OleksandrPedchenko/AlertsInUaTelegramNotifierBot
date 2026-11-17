@@ -170,7 +170,7 @@ function allDayLight() {
 }
 
 function parseLightSchedule(html, queue, subQueue, options = {}) {
-  const response = new PoeResponse(html);
+  const response = html instanceof PoeResponse ? html : new PoeResponse(html);
   const todayParser = new Parser(response.todayTable, queue, subQueue, options);
   const tomorrowParser = new Parser(response.tomorrowTable, queue, subQueue, options);
 
