@@ -5,6 +5,7 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const test = require("node:test");
 const { runFanout } = require("../src/jobs/light/fanout");
+const { classify } = require("../src/jobs/light/gav");
 const { createDefaultState, renderPoeHtml } = require("../src/jobs/light/mockServer");
 const { createSilentLogger, createTempDir, createTextResponse } = require("./helpers");
 
@@ -13,6 +14,17 @@ function channelHtml(posts) {
     `<div class="tgme_widget_message" data-post="poltavaOE/${id}"><div class="tgme_widget_message_text">${text}</div><time datetime="2026-11-06T10:00:00+00:00"></time></div>`
   ).join("")}</body></html>`;
 }
+
+test("classifies SGAV operational notices without matching general coverage", () => {
+  assert.equal(classify("О 17:02 застосовано СГАВ."), "sgav-applied");
+  assert.equal(classify("О 19:10 скасовано СГАВ."), "sgav-cancelled");
+  assert.equal(classify("СГАВ скасовано!"), "sgav-cancelled");
+  assert.equal(classify("СГАВ відмінено!"), "sgav-cancelled");
+  assert.equal(classify("Як тільки ситуація стабілізується СГАВ буде скасовано."), null);
+  assert.equal(classify("О 17:02 застосовано ГПВ."), null);
+  assert.equal(classify("В області застосовано ГАВ!"), "applied");
+  assert.equal(classify("ГАВ скасовано!"), "cancelled");
+});
 
 test("GAV polling baselines new chats, sends new posts once, and retries failed destinations", async () => {
   const dir = await createTempDir();
@@ -95,4 +107,12 @@ test("GAV polling baselines new chats, sends new posts once, and retries failed 
   await fs.writeFile(file, JSON.stringify(subscriptions));
   await run();
   assert.equal(sent.length, 5, "re-enabled chat does not replay posts from the disabled period");
+
+  posts = [...posts, [105, "О 17:02 застосовано СГАВ."], [106, "О 19:10 скасовано СГАВ."]];
+  await run();
+  assert.equal(sent.length, 7);
+  assert.match(sent[5].text, /^<b>🔴 В області застосовано СГАВ<\/b>\n\nО 17:02 застосовано СГАВ\./);
+  assert.match(sent[6].text, /^<b>🟢 СГАВ скасовано<\/b>\n\nО 19:10 скасовано СГАВ\./);
+  await run();
+  assert.equal(sent.length, 7);
 });

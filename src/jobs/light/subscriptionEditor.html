@@ -169,7 +169,7 @@
         if (gavToggle.checked) chat.settings.gavNotifications = true;
         else delete chat.settings.gavNotifications;
       });
-      gavLabel.append(gavToggle, "ГАВ alerts");
+      gavLabel.append(gavToggle, "ГАВ / СГАВ alerts");
       card.append(gavLabel);
       const details = element("details");
       details.append(element("summary", "", "Notification settings"));

@@ -107,3 +107,10 @@ test("GAV notices use the light message headline and body layout", () => {
   assert.equal(cancelled, "<b>🟢 ГАВ скасовано</b>\n\nО 12:41 скасовано 5 черг ГАВ.");
   assert.doesNotMatch(applied + cancelled, /Джерело|https?:\/\//);
 });
+
+test("SGAV notices use the same light message layout", () => {
+  assert.equal(buildGavNotification({ type: "sgav-applied", text: "О 17:02 застосовано СГАВ." }),
+    "<b>🔴 В області застосовано СГАВ</b>\n\nО 17:02 застосовано СГАВ.");
+  assert.equal(buildGavNotification({ type: "sgav-cancelled", text: "СГАВ скасовано!\nО 19:10 скасовано СГАВ." }),
+    "<b>🟢 СГАВ скасовано</b>\n\nО 19:10 скасовано СГАВ.");
+});
