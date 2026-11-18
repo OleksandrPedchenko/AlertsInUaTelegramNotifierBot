@@ -43,6 +43,17 @@ test("GAV parser keeps post order and decoded nested text while rejecting other 
   ]);
 });
 
+test("GAV parser ignores markup in scripts and keeps nested message text", () => {
+  const html = `<script>const decoy = '<div class="tgme_widget_message" data-post="poltavaOE/999">';</script>
+    <!-- <div class="tgme_widget_message" data-post="poltavaOE/998"> -->
+    <DIV data-post="poltavaOE/106" class="other tgme_widget_message">
+      <DIV class="tgme_widget_message_text js-message_text">ГАВ <div><span>скасовано</span></div>&#33;<br/>О 14:00</DIV>
+    </DIV>`;
+  assert.deepEqual(parsePosts(html), [
+    { id: 106, text: "ГАВ скасовано!\nО 14:00", type: "cancelled" }
+  ]);
+});
+
 test("GAV polling measures headers, body reading, and HTML parsing separately", async () => {
   const dir = await createTempDir();
   const logger = createMemoryLogger();
