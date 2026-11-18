@@ -13,7 +13,7 @@ const { loadLightConfig } = require("./config");
 const { buildGeminiUrl, changedWindowsForPrompt, extractGeminiText, trimPeriodsForPrompt } = require("./geminiClient");
 const { effectiveDay } = require("./effectiveSchedule");
 const { processGav } = require("./gav");
-const { parseLightSchedule } = require("./parser");
+const { PoeResponse, parseLightSchedule } = require("./parser");
 const { loadSubscriptions } = require("./subscriptions");
 const { buildCurrentLightState, dateFromCurrentMinute, dayFingerprint, fetchPoeData, getRelevantChangedDays, getCurrentMinute, lightPlugin, previousScheduleForDay, readStubData } = require("./plugin");
 
@@ -213,12 +213,16 @@ async function runFanout(env = process.env, options = {}) {
     const currentMinute = Number.isInteger(config.job.currentMinute)
       ? config.job.currentMinute : getCurrentMinute();
     const schedules = new Map();
+    let parsed;
     for (const { queue, subQueue } of subscriptions) {
       const queueKey = `${queue}.${subQueue}`;
       if (!schedules.has(queueKey)) {
-        schedules.set(queueKey, performance.phaseSync("parse_html", () => parseLightSchedule(response.html, queue, subQueue, {
-          now: dateFromCurrentMinute(currentMinute)
-        })));
+        schedules.set(queueKey, performance.phaseSync("parse_html", () => {
+          parsed ||= new PoeResponse(response.html);
+          return parseLightSchedule(parsed, queue, subQueue, {
+            now: dateFromCurrentMinute(currentMinute)
+          });
+        }));
       }
     }
     const items = [];

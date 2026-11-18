@@ -1,6 +1,30 @@
 "use strict";
 
-const { JSDOM } = require("jsdom");
+const { parse } = require("parse5");
+const { scanPoeSchedule } = require("./poeFastScan");
+
+const children = node => node?.childNodes || [];
+const classes = node => node?.attrs?.find(attribute => attribute.name === "class")?.value.split(/\s+/) || [];
+
+function descendants(node, predicate) {
+  const matches = [];
+  for (const child of children(node)) {
+    if (predicate(child)) matches.push(child);
+    matches.push(...descendants(child, predicate));
+  }
+  return matches;
+}
+
+function closest(node, predicate) {
+  for (let current = node; current; current = current.parentNode) {
+    if (predicate(current)) return current;
+  }
+  return null;
+}
+
+function textContent(node) {
+  return node?.nodeName === "#text" ? node.value : children(node).map(textContent).join("");
+}
 
 const STATUS = Object.freeze({
   turnedOn: 1,
@@ -17,7 +41,14 @@ const STATUS_LABELS = Object.freeze({
 class PoeResponse {
   constructor(data) {
     this.$data = data;
-    this.dom = new JSDOM(data);
+    this.fastScan = scanPoeSchedule(data);
+    if (!this.fastScan) this.parseDom();
+  }
+
+  parseDom() {
+    this.dom = parse(this.$data);
+    this.tables = descendants(this.dom, node => node.tagName === "tbody")
+      .filter(body => !closest(body, node => node.tagName === "table" && classes(node).includes("gpv-vtable")));
   }
 
   get todayTable() {
@@ -29,25 +60,27 @@ class PoeResponse {
   }
 
   getTable(index = 0) {
-    return Array.from(this.dom.window.document.querySelectorAll("tbody"))
-      .filter((body) => !body.closest("table.gpv-vtable"))[index] || null;
+    if (!this.dom) this.parseDom();
+    return this.tables[index] || null;
   }
 
   get updatedAt() {
-    const details = this.dom.window.document.querySelector(".gpvinfodetail");
+    if (this.fastScan) return this.fastScan.days[0].updatedAt;
+    const details = descendants(this.dom, node => classes(node).includes("gpvinfodetail"))[0];
     return this.updatedAtIn(details);
   }
 
   updatedAtForTable(table) {
-    return this.updatedAtIn(table?.closest(".gpvinfodetail")) || this.updatedAt;
+    return this.updatedAtIn(closest(table, node => classes(node).includes("gpvinfodetail"))) || this.updatedAt;
   }
 
   updatedAtIn(details) {
-    if (!details || !details.lastElementChild) {
+    const lastElement = children(details).filter(node => node.tagName).at(-1);
+    if (!lastElement) {
       return null;
     }
 
-    return details.lastElementChild.textContent.trim() || null;
+    return textContent(lastElement).trim() || null;
   }
 }
 
@@ -56,19 +89,22 @@ class Parser {
     this.queue = queue;
     this.subQueue = subQueue;
     this.now = options.now || new Date();
+    this.states = options.states;
+    if (this.states) return;
     const index = (this.queue - 1) * 2 + (this.subQueue - 1);
     this.table = table;
-    const row = table ? table.querySelectorAll("tr")[index] : null;
-    this.elements = row ? row.querySelectorAll("td") : [];
+    const row = table ? descendants(table, node => node.tagName === "tr")[index] : null;
+    this.elements = row ? descendants(row, node => node.tagName === "td") : [];
   }
 
   get segments() {
-    const labelCells = this.table?.closest("table.gpv-table") ? 1 : (this.subQueue === 1 ? 2 : 1);
-    const array = Array.from(this.elements)
+    const labelCells = closest(this.table, node => node.tagName === "table" && classes(node).includes("gpv-table"))
+      ? 1 : (this.subQueue === 1 ? 2 : 1);
+    const array = this.states || Array.from(this.elements)
       .slice(labelCells)
       .map((element) =>
         Number(
-          [...element.classList].map((className) => className.match(/^(?:light_|gpv-s)([123])$/)).find(Boolean)?.[1]
+          classes(element).map((className) => className.match(/^(?:light_|gpv-s)([123])$/)).find(Boolean)?.[1]
         )
       );
     const result = [];
@@ -147,7 +183,8 @@ function prettyTime(minutes) {
 
 function hasExplicitNoScheduleNotice(response) {
   if (response.todayTable) return false;
-  const text = response.dom.window.document.body.textContent.replace(/\s+/g, " ").toLowerCase();
+  const body = descendants(response.dom, node => node.tagName === "body")[0];
+  const text = textContent(body).replace(/\s+/g, " ").toLowerCase();
   return /(?:гпв|графік|відключенн)/u.test(text) &&
     /(?:не\s+(?:запланован|запроваджен|застосов|передбачен)\w*|відсутн\w*|немає)/u.test(text);
 }
@@ -170,12 +207,32 @@ function allDayLight() {
 }
 
 function parseLightSchedule(html, queue, subQueue, options = {}) {
-  const response = new PoeResponse(html);
+  const response = html instanceof PoeResponse ? html : new PoeResponse(html);
+  if (response.fastScan) {
+    const index = (queue - 1) * 2 + (subQueue - 1);
+    const [today, tomorrow] = response.fastScan.days;
+    const states = today.rows[index]?.states;
+    if (!states) throw new Error(`POE schedule row ${queue}.${subQueue} is missing or invalid`);
+    const schedule = values => {
+      const parser = new Parser(null, queue, subQueue, { ...options, states: values });
+      return {
+        timePeriods: parser.timePeriods,
+        totalTimeOn: parser.totalTimeOn,
+        totalTimeOff: parser.totalTimeOff
+      };
+    };
+    return {
+      queue, subQueue, updatedAt: today.updatedAt,
+      today: schedule(states),
+      tomorrow: { updatedAt: tomorrow?.updatedAt || today.updatedAt,
+        ...schedule(tomorrow?.rows[index]?.states || []) }
+    };
+  }
   const todayParser = new Parser(response.todayTable, queue, subQueue, options);
   const tomorrowParser = new Parser(response.tomorrowTable, queue, subQueue, options);
 
-  const hasSchedule = Array.from(todayParser.elements).some((cell) =>
-    [...cell.classList].some((name) => /^(?:light_|gpv-s)[123]$/.test(name))
+  const hasSchedule = todayParser.elements.some((cell) =>
+    classes(cell).some((name) => /^(?:light_|gpv-s)[123]$/.test(name))
   );
   if (!hasSchedule) {
     if (hasExplicitNoScheduleNotice(response)) {

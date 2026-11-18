@@ -1,6 +1,6 @@
 "use strict";
 
-const { JSDOM } = require("jsdom");
+const { parseFragment } = require("parse5");
 const { requestWithRetry } = require("../../lib/httpClient");
 const { readJobState, writeJobState } = require("../../lib/stateStore");
 const { sendTelegramMessage } = require("../../lib/telegramNotifier");
@@ -24,14 +24,37 @@ function classify(text) {
 }
 
 function parsePosts(html) {
-  const document = new JSDOM(html).window.document;
-  return [...document.querySelectorAll(".tgme_widget_message[data-post]")].map(post => {
-    const id = Number(/^poltavaOE\/(\d+)$/.exec(post.getAttribute("data-post"))?.[1]);
-    const content = post.querySelector(".tgme_widget_message_text")?.cloneNode(true);
-    if (content) for (const br of content.querySelectorAll("br")) br.replaceWith(document.createTextNode("\n"));
-    const text = content?.textContent?.trim() || "";
-    return { id, text, type: classify(text) };
-  }).filter(post => Number.isSafeInteger(post.id) && post.id > 0);
+  const classAttribute = /(?:^|\s)class\s*=\s*(["'])(.*?)\1/i;
+  const postAttribute = /(?:^|\s)data-post\s*=\s*(["'])(.*?)\1/i;
+  const hasClass = (tag, name) => classAttribute.exec(tag)?.[2].split(/\s+/).includes(name);
+  const textContent = node => node.nodeName === "#text" ? node.value
+    : node.tagName === "br" ? "\n" : (node.childNodes || []).map(textContent).join("");
+  const tagPattern = /<script\b[^>]*>[\s\S]*?<\/script\s*>|<style\b[^>]*>[\s\S]*?<\/style\s*>|<!--[\s\S]*?-->|<div\b[^>]*>/gi;
+  const posts = [];
+  let current;
+  for (const match of html.matchAll(tagPattern)) {
+    const tag = match[0];
+    if (!/^<div\b/i.test(tag)) continue;
+    if (hasClass(tag, "tgme_widget_message")) {
+      const id = Number(/^poltavaOE\/(\d+)$/.exec(postAttribute.exec(tag)?.[2])?.[1]);
+      current = Number.isSafeInteger(id) && id > 0 ? { id, text: "", type: null } : null;
+      if (current) posts.push(current);
+    } else if (current && !current.text && hasClass(tag, "tgme_widget_message_text")) {
+      const start = match.index + tag.length;
+      const divTags = /<\/?div\b[^>]*>/gi;
+      divTags.lastIndex = start;
+      let depth = 1;
+      let end = start;
+      for (const div of html.matchAll(divTags)) {
+        depth += div[0][1] === "/" ? -1 : 1;
+        if (depth === 0) { end = div.index; break; }
+      }
+      const fragment = parseFragment(html.slice(start, end));
+      current.text = textContent(fragment).trim();
+      current.type = classify(current.text);
+    }
+  }
+  return posts;
 }
 
 async function fetchPosts(after, config, deps) {
