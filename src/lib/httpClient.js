@@ -79,6 +79,7 @@ async function requestWithRetry({
   retryBaseDelayMs = 500,
   responseType = "text",
   fetchImpl = globalThis.fetch,
+  measurePhase = (_name, operation) => operation(),
   logger
 }) {
   if (typeof fetchImpl !== "function") {
@@ -96,12 +97,12 @@ async function requestWithRetry({
 
       let response;
       try {
-        response = await fetchImpl(url, {
+        response = await measurePhase("fetch_headers", () => fetchImpl(url, {
           method,
           headers,
           body,
           signal: controller.signal
-        });
+        }));
       } finally {
         clearTimeout(timeoutId);
       }
@@ -116,7 +117,7 @@ async function requestWithRetry({
         };
       }
 
-      const responseBody = await parseResponseBody(response, responseType);
+      const responseBody = await measurePhase("read_body", () => parseResponseBody(response, responseType));
 
       if (!response.ok) {
         throw new HttpRequestError(`HTTP request failed with status ${response.status}`, {

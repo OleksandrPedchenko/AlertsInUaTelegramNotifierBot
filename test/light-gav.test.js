@@ -5,9 +5,10 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const test = require("node:test");
 const { runFanout } = require("../src/jobs/light/fanout");
-const { classify } = require("../src/jobs/light/gav");
+const { classify, processGav } = require("../src/jobs/light/gav");
+const { createPerformance } = require("../src/lib/performance");
 const { createDefaultState, renderPoeHtml } = require("../src/jobs/light/mockServer");
-const { createSilentLogger, createTempDir, createTextResponse } = require("./helpers");
+const { createMemoryLogger, createSilentLogger, createTempDir, createTextResponse } = require("./helpers");
 
 function channelHtml(posts) {
   return `<html><body>${posts.map(([id, text]) =>
@@ -24,6 +25,49 @@ test("classifies SGAV operational notices without matching general coverage", ()
   assert.equal(classify("О 17:02 застосовано ГПВ."), null);
   assert.equal(classify("В області застосовано ГАВ!"), "applied");
   assert.equal(classify("ГАВ скасовано!"), "cancelled");
+});
+
+test("GAV polling measures headers, body reading, and HTML parsing separately", async () => {
+  const dir = await createTempDir();
+  const logger = createMemoryLogger();
+  const performance = createPerformance("light", logger);
+  const sent = await processGav([{ chatId: "a", settings: { gavNotifications: true } }], {
+    job: { stateFilePath: path.join(dir, "state.json") },
+    telegram: { timeoutMs: 1000, maxRetries: 0, retryBaseDelayMs: 1 }
+  }, {
+    logger, performance,
+    fetchImpl: async () => createTextResponse(200, channelHtml([[100, "Оновлено графік"]]))
+  });
+  assert.equal(sent, 0);
+  assert.deepEqual(logger.entries.filter(entry => entry.meta?.event === "job_phase_performance")
+    .map(entry => entry.meta.phase), ["gav_fetch_headers", "gav_read_body", "gav_parse_html"]);
+});
+
+test("light fan-out measures POE transfer and routine state work separately", async () => {
+  const dir = await createTempDir();
+  const subscriptionsFile = path.join(dir, "subscriptions.json");
+  await fs.writeFile(subscriptionsFile, JSON.stringify({ queues: {
+    "1.1": { enabled: true, chats: [{ chatId: "a", settings: {} }] }
+  } }));
+  const logger = createMemoryLogger();
+  const performance = createPerformance("light", logger);
+  const env = {
+    TG_BOT_TOKEN: "test-token", LIGHT_SUBSCRIPTIONS_FILE: subscriptionsFile,
+    LIGHT_STATE_FILE_PATH: path.join(dir, "state.json"), LIGHT_LOCK_FILE_PATH: path.join(dir, "lock"),
+    LIGHT_PIN_TODAY_SCHEDULE: "false", LIGHT_SCHEDULE_IMAGE_ENABLED: "false",
+    LIGHT_TG_HTTP_MAX_RETRIES: "0", LIGHT_CURRENT_MINUTE: "0"
+  };
+  await runFanout(env, {
+    logger, performance,
+    fetchImpl: async url => String(url).includes("api.telegram.org")
+      ? createTextResponse(200, JSON.stringify({ ok: true }))
+      : createTextResponse(200, renderPoeHtml(createDefaultState()))
+  });
+  const phases = logger.entries.filter(entry => entry.meta?.event === "job_phase_performance")
+    .map(entry => entry.meta.phase);
+  for (const phase of ["poe_fetch_headers", "poe_read_body", "build_current_state", "sync_today_pin"]) {
+    assert.ok(phases.includes(phase), `${phase} phase missing`);
+  }
 });
 
 test("GAV polling baselines new chats, sends new posts once, and retries failed destinations", async () => {

@@ -4,6 +4,7 @@ const dotenv = require("dotenv");
 const { ConfigError } = require("../../lib/config");
 const { HttpRequestError } = require("../../lib/httpClient");
 const { createLoggerFromEnv } = require("../../lib/logger");
+const { createPerformance } = require("../../lib/performance");
 const { NotificationError } = require("../../lib/telegramNotifier");
 const { runPluginJob } = require("../../lib/runner");
 const { createEnvReader } = require("../../lib/config");
@@ -27,14 +28,21 @@ async function runLightJob(config, options = {}) {
 }
 
 async function main(options = {}) {
-  if (!createEnvReader(process.env).readBoolean("LIGHT_ENABLED", true)) return;
   const logger = options.logger || createLoggerFromEnv(process.env);
+  const performance = createPerformance("light", logger);
+  let status = "failure";
 
   try {
-    await runLightJob(undefined, {
+    if (!createEnvReader(process.env).readBoolean("LIGHT_ENABLED", true)) {
+      status = "skipped";
+      return;
+    }
+    const result = await runLightJob(undefined, {
       ...options,
-      logger
+      logger,
+      performance
     });
+    status = result.skipped ? "skipped" : "success";
   } catch (error) {
     if (error instanceof ConfigError) {
       logger.error("Configuration error", { error: error.message });
@@ -65,6 +73,7 @@ async function main(options = {}) {
     logger.error("Unexpected job failure", { error });
     process.exitCode = 1;
   } finally {
+    performance.finish(status);
     await logger.flush?.();
   }
 }
