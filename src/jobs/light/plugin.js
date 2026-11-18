@@ -23,6 +23,8 @@ async function fetchPoeData(config, deps) {
     retryBaseDelayMs: config.poe.retryBaseDelayMs,
     responseType: "text",
     fetchImpl: deps.fetchImpl,
+    measurePhase: (name, operation) => deps.performance
+      ? deps.performance.phase(`poe_${name}`, operation) : operation(),
     logger: deps.logger
   });
 
