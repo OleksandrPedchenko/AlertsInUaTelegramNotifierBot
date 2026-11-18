@@ -232,13 +232,15 @@ async function runFanout(env = process.env, options = {}) {
       const previousRecord = await performance.phase("load_state", () => readJobState(config.job.stateFilePath, stateKey));
       const previousState = previousRecord?.state || null;
       const subscriberConfig = subscription.config;
-      const currentState = buildCurrentLightState(schedules.get(queueKey), subscriberConfig, previousState, response);
-      const fingerprint = lightPlugin.getStateFingerprint(currentState);
-      const previousFingerprint = previousRecord?.fingerprint ||
-        (previousState && lightPlugin.getStateFingerprint(previousState));
-      const changed = previousFingerprint !== fingerprint;
-      items.push({ queueKey, stateKey, previousState, previousRecord, currentState,
-        fingerprint, changed, config: subscriberConfig });
+      items.push(performance.phaseSync("build_current_state", () => {
+        const currentState = buildCurrentLightState(schedules.get(queueKey), subscriberConfig, previousState, response);
+        const fingerprint = lightPlugin.getStateFingerprint(currentState);
+        const previousFingerprint = previousRecord?.fingerprint ||
+          (previousState && lightPlugin.getStateFingerprint(previousState));
+        const changed = previousFingerprint !== fingerprint;
+        return { queueKey, stateKey, previousState, previousRecord, currentState,
+          fingerprint, changed, config: subscriberConfig };
+      }));
     }
     const summaries = await performance.phase("gemini_processing", () => prepareGeminiSummaries(items, config, deps));
     const failures = [];
@@ -248,7 +250,9 @@ async function runFanout(env = process.env, options = {}) {
       try {
         if (!performance.phaseSync("compare_schedule", () => lightPlugin.shouldNotify({ previousState: item.previousState, changed: item.changed, config: item.config, currentState: item.currentState }))) {
           await performance.phase("save_state", () => writeJobState(config.job.stateFilePath, item.stateKey, item.currentState, item.fingerprint));
-          await lightPlugin.syncTodayPin({ config: item.config, stateKey: item.stateKey, currentState: item.currentState, deps });
+          await performance.phase("sync_today_pin", () => lightPlugin.syncTodayPin({
+            config: item.config, stateKey: item.stateKey, currentState: item.currentState, deps
+          }));
           continue;
         }
         const deliveryDeps = {
@@ -290,7 +294,9 @@ async function runFanout(env = process.env, options = {}) {
           const savedState = updated || item.currentState;
           await performance.phase("save_state", () => writeJobState(config.job.stateFilePath, item.stateKey, savedState,
             lightPlugin.getStateFingerprint(savedState)));
-          await lightPlugin.syncTodayPin({ config: item.config, stateKey: item.stateKey, currentState: item.currentState, deps });
+          await performance.phase("sync_today_pin", () => lightPlugin.syncTodayPin({
+            config: item.config, stateKey: item.stateKey, currentState: item.currentState, deps
+          }));
         }
       } catch (error) {
         failures.push(item.stateKey);
