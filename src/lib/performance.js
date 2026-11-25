@@ -1,13 +1,55 @@
 "use strict";
 
 const { randomUUID } = require("node:crypto");
+const { getHeapStatistics } = require("node:v8");
 
 function createPerformance(jobName, logger) {
   const runId = randomUUID();
-  const startedCpu = process.cpuUsage();
-  const startedAt = process.hrtime.bigint();
+  const heapLimitBytes = getHeapStatistics().heap_size_limit;
+  let peakObservedHeapUsedBytes = 0;
   let notificationCount = 0;
   let imageGenerated = false;
+
+  function memorySnapshot() {
+    const memory = process.memoryUsage();
+    peakObservedHeapUsedBytes = Math.max(peakObservedHeapUsedBytes, memory.heapUsed);
+    return {
+      rssBytes: memory.rss,
+      peakRssBytes: process.resourceUsage().maxRSS * 1024,
+      heapUsedBytes: memory.heapUsed,
+      heapTotalBytes: memory.heapTotal,
+      heapLimitBytes,
+      heapUtilizationPercent: memory.heapUsed / heapLimitBytes * 100,
+      externalBytes: memory.external,
+      arrayBuffersBytes: memory.arrayBuffers,
+      peakObservedHeapUsedBytes
+    };
+  }
+
+  const startedMemory = memorySnapshot();
+  const startedCpu = process.cpuUsage();
+  const startedAt = process.hrtime.bigint();
+
+  function memorySince(start) {
+    const current = memorySnapshot();
+    return {
+      ...current,
+      rssDeltaBytes: current.rssBytes - start.rssBytes,
+      heapUsedDeltaBytes: current.heapUsedBytes - start.heapUsedBytes,
+      heapTotalDeltaBytes: current.heapTotalBytes - start.heapTotalBytes,
+      externalDeltaBytes: current.externalBytes - start.externalBytes,
+      arrayBuffersDeltaBytes: current.arrayBuffersBytes - start.arrayBuffersBytes
+    };
+  }
+
+  function processElapsed() {
+    const cpu = process.cpuUsage();
+    const processWallMs = process.uptime() * 1000;
+    const processUserCpuMs = cpu.user / 1000;
+    const processSystemCpuMs = cpu.system / 1000;
+    const processCpuMs = processUserCpuMs + processSystemCpuMs;
+    return { processWallMs, processCpuMs, processUserCpuMs, processSystemCpuMs };
+  }
 
   function emit(message, fields) {
     try {
@@ -28,6 +70,7 @@ function createPerformance(jobName, logger) {
   }
 
   async function phase(name, operation) {
+    const startMemory = memorySnapshot();
     const cpu = process.cpuUsage();
     const start = process.hrtime.bigint();
     let status = "success";
@@ -39,12 +82,13 @@ function createPerformance(jobName, logger) {
     } finally {
       emit("job_phase_performance", {
         event: "job_phase_performance", jobName, runId, phase: name, status,
-        ...elapsed(cpu, start)
+        ...elapsed(cpu, start), ...memorySince(startMemory)
       });
     }
   }
 
   function phaseSync(name, operation) {
+    const startMemory = memorySnapshot();
     const cpu = process.cpuUsage();
     const start = process.hrtime.bigint();
     let status = "success";
@@ -56,7 +100,7 @@ function createPerformance(jobName, logger) {
     } finally {
       emit("job_phase_performance", {
         event: "job_phase_performance", jobName, runId, phase: name, status,
-        ...elapsed(cpu, start)
+        ...elapsed(cpu, start), ...memorySince(startMemory)
       });
     }
   }
@@ -70,7 +114,7 @@ function createPerformance(jobName, logger) {
       emit("job_performance", {
         event: "job_performance", jobName, runId, status,
         notified: notificationCount > 0, notificationCount, imageGenerated,
-        ...elapsed(startedCpu, startedAt)
+        ...elapsed(startedCpu, startedAt), ...memorySince(startedMemory), ...processElapsed()
       });
     }
   };
