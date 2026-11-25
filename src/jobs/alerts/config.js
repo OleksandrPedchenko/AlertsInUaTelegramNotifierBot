@@ -119,6 +119,8 @@ function loadAlertsConfig(_env, readers) {
     log: {
       logFilePath: readers.readOptionalString("LOG_FILE_PATH", "alerts.log"),
       retentionDays: readers.readNumber("LOG_RETENTION_DAYS", 7, { integer: true, min: 0 }),
+      maxFileBytes: readers.readNumber("LOG_MAX_FILE_BYTES", 10 * 1024 * 1024, { integer: true, min: 1 }),
+      maxFiles: readers.readNumber("LOG_MAX_FILES", 7, { integer: true, min: 1 }),
       loki: readLokiConfig(readers)
     }
   };

@@ -74,7 +74,9 @@ One-shot Node.js job that fetches active air raid alert state for a region and t
 - `LOCK_FILE_PATH` (optional): lock file path, default `.alerts-job.lock`.
 - `STATE_FILE_PATH` (optional): persisted last-seen state file, default `.alerts-last-state.json`.
 - `LOG_FILE_PATH` (optional): JSON-lines log file path (resolved from project root), default `alerts.log`.
-- `LOG_RETENTION_DAYS` (optional): keeps only log entries newer than `N` days in `LOG_FILE_PATH` (`0` disables trimming), default `7`.
+- `LOG_RETENTION_DAYS` (optional): removes rotated files after `N` days and rotates an active file at least daily; `0` disables archive cleanup and age-based rotation. Default `7`.
+- `LOG_MAX_FILE_BYTES` (optional): rotate the active JSON-lines file before the next entry would exceed this size; default `10485760` (10 MiB). A single large entry or overlapping writes can exceed the limit briefly.
+- `LOG_MAX_FILES` (optional): retain at most this many older rotated files after the short overlap grace period when retention is enabled; default `7`.
 - `LOKI_IP` (optional): Loki host/IP for pushing logs, default `192.168.0.41`.
 - `LOKI_PORT` (optional): Loki HTTP port, default `3100`.
 - `LOKI_PROTOCOL` (optional): Loki protocol, default `http`.
@@ -256,6 +258,8 @@ Example light job every minute:
 - The job uses a lock file to avoid overlapping runs.
 - Logs are emitted as JSON lines for easier ingestion in production logging systems.
 - Logs are persisted to `LOG_FILE_PATH` (default `alerts.log` in project root). The default `.gitignore` already excludes `*.log`.
+- Both jobs may share this file. Rotation renames it to a unique `*.log` archive and opens the active path for each append, so concurrent runs do not retain a stale file descriptor. Old archives are pruned at logger startup without reading their contents. Recently rotated files have a one-minute grace period before pruning to protect writes already in progress; archive count can temporarily exceed `LOG_MAX_FILES`.
+- No `logrotate` setup is needed. Existing `.env` files can keep `LOG_FILE_PATH` and `LOG_RETENTION_DAYS`; the new limits are optional. On the first run after upgrade, an oversized historical file becomes an archive. Review disk space for that one-time archive; later starts remove it according to the configured limits and age after the grace period.
 - Logs are also buffered during a run and pushed to Loki after the job finishes at `LOKI_PROTOCOL://LOKI_IP:LOKI_PORT/loki/api/v1/push` with `app`, `level`, and `job` stream labels.
 
 ### CPU and performance dashboard
