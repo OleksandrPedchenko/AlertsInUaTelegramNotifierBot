@@ -1,10 +1,11 @@
 {
   "id": null,
   "uid": "alerts-bot-cpu-performance",
-  "title": "Alerts Bot — CPU & Performance",
+  "title": "Alerts Bot — CPU & RAM Performance",
   "tags": [
     "alerts-bot",
-    "performance"
+    "performance",
+    "memory"
   ],
   "timezone": "browser",
   "schemaVersion": 41,
@@ -972,11 +973,255 @@
       "title": "Detailed execution logs",
       "gridPos": {
         "x": 0,
+        "y": 109,
+        "w": 24,
+        "h": 1
+      },
+      "collapsed": false
+    },
+    {
+      "id": 31,
+      "type": "row",
+      "title": "RAM and JavaScript heap",
+      "gridPos": {
+        "x": 0,
         "y": 84,
         "w": 24,
         "h": 1
       },
       "collapsed": false
+    },
+    {
+      "id": 32,
+      "type": "stat",
+      "title": "Maximum peak RSS",
+      "description": "Largest process-lifetime peak resident memory across the selected jobs and time range.",
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 85,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(max_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | unwrap peakRssBytes | __error__=\"\"[$__range]))",
+          "queryType": "instant",
+          "legendFormat": "Maximum"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "noValue": "No measurements yet"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "textMode": "auto",
+        "colorMode": "none"
+      }
+    },
+    {
+      "id": 33,
+      "type": "stat",
+      "title": "Maximum sampled heap",
+      "description": "Largest JavaScript heap sample across selected jobs; brief spikes may be missed.",
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 85,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(max_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | unwrap peakObservedHeapUsedBytes | __error__=\"\"[$__range]))",
+          "queryType": "instant",
+          "legendFormat": "Maximum"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "noValue": "No measurements yet"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "textMode": "auto",
+        "colorMode": "none"
+      }
+    },
+    {
+      "id": 34,
+      "type": "timeseries",
+      "title": "RSS over time",
+      "description": "Resident memory at job completion and process lifetime peak, grouped by job.",
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 93,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (job) (max_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | unwrap rssBytes | __error__=\"\"[$__interval]))",
+          "queryType": "range",
+          "legendFormat": "{{job}} RSS"
+        },
+        {
+          "refId": "B",
+          "expr": "max by (job) (max_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | unwrap peakRssBytes | __error__=\"\"[$__interval]))",
+          "queryType": "range",
+          "legendFormat": "{{job}} peak RSS"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "noValue": "No measurements yet"
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 35,
+      "type": "timeseries",
+      "title": "JavaScript heap over time",
+      "description": "Heap used at job completion and sampled peak, grouped by job.",
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 93,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (job) (max_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | unwrap heapUsedBytes | __error__=\"\"[$__interval]))",
+          "queryType": "range",
+          "legendFormat": "{{job}} used"
+        },
+        {
+          "refId": "B",
+          "expr": "max by (job) (max_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | unwrap peakObservedHeapUsedBytes | __error__=\"\"[$__interval]))",
+          "queryType": "range",
+          "legendFormat": "{{job}} sampled peak"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "noValue": "No measurements yet"
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 36,
+      "type": "timeseries",
+      "title": "Heap utilization",
+      "description": "Heap used as a percentage of the V8 heap limit at job completion.",
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 101,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (job) (max_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | unwrap heapUtilizationPercent | __error__=\"\"[$__interval]))",
+          "queryType": "range",
+          "legendFormat": "{{job}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "noValue": "No measurements yet"
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 37,
+      "type": "barchart",
+      "title": "Memory change by phase",
+      "description": "Average end minus start memory per phase. Negative values mean memory fell; nested phases overlap.",
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 101,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "avg by (phase) (avg_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_phase_performance\" | unwrap rssDeltaBytes | __error__=\"\"[$__range]))",
+          "queryType": "instant",
+          "legendFormat": "RSS {{phase}}"
+        },
+        {
+          "refId": "B",
+          "expr": "avg by (phase) (avg_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_phase_performance\" | unwrap heapUsedDeltaBytes | __error__=\"\"[$__range]))",
+          "queryType": "instant",
+          "legendFormat": "Heap {{phase}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "noValue": "No measurements yet"
+        },
+        "overrides": []
+      },
+      "options": {}
     },
     {
       "id": 29,
@@ -989,7 +1234,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 85,
+        "y": 110,
         "w": 24,
         "h": 10
       },
@@ -1028,7 +1273,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 95,
+        "y": 120,
         "w": 24,
         "h": 10
       },

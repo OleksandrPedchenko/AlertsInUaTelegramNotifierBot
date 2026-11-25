@@ -31,3 +31,30 @@ test("broken performance logger cannot break the operation", async () => {
   assert.equal(await performance.phase("fetch_http", async () => "ok"), "ok");
   performance.finish("success");
 });
+
+test("job and phase events report memory snapshots, deltas, and process lifetime", async () => {
+  const logger = createMemoryLogger();
+  const performance = createPerformance("light", logger);
+  const allocated = await performance.phase("allocate", async () => Buffer.alloc(4 * 1024 * 1024));
+  performance.finish("success");
+
+  const [phase, job] = logger.entries.map(entry => entry.meta);
+  for (const event of [phase, job]) {
+    for (const key of ["rssBytes", "peakRssBytes", "heapUsedBytes", "heapTotalBytes",
+      "heapLimitBytes", "heapUtilizationPercent", "externalBytes", "arrayBuffersBytes",
+      "peakObservedHeapUsedBytes", "rssDeltaBytes", "heapUsedDeltaBytes",
+      "heapTotalDeltaBytes", "externalDeltaBytes", "arrayBuffersDeltaBytes"]) {
+      assert.equal(typeof event[key], "number", key);
+    }
+    assert.ok(event.peakRssBytes >= event.rssBytes);
+    assert.ok(event.peakObservedHeapUsedBytes >= event.heapUsedBytes);
+    assert.ok(event.heapLimitBytes >= event.heapTotalBytes);
+    assert.ok(event.heapUtilizationPercent >= 0);
+    assert.ok(event.heapUtilizationPercent <= 100);
+  }
+  assert.ok(job.processWallMs >= job.wallMs);
+  assert.ok(job.processCpuMs >= job.cpuMs);
+  assert.equal(job.processCpuMs, job.processUserCpuMs + job.processSystemCpuMs);
+  assert.ok(phase.arrayBuffersDeltaBytes >= allocated.byteLength);
+  assert.ok(phase.externalDeltaBytes >= allocated.byteLength);
+});

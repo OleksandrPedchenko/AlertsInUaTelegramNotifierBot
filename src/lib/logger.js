@@ -2,9 +2,12 @@
 
 const fs = require("fs");
 const path = require("path");
+const { randomUUID } = require("node:crypto");
 
 const DEFAULT_LOG_FILE_PATH = "alerts.log";
 const DEFAULT_LOG_RETENTION_DAYS = 7;
+const DEFAULT_LOG_MAX_FILE_BYTES = 10 * 1024 * 1024;
+const DEFAULT_LOG_MAX_FILES = 7;
 const DEFAULT_LOKI_IP = "192.168.0.41";
 const DEFAULT_LOKI_PORT = 3100;
 const DEFAULT_LOKI_APP_LABEL = "alerts-tg-bot";
@@ -33,48 +36,66 @@ function normalizeMeta(meta) {
   return normalized;
 }
 
-function ensureLogFileReady(logFilePath, retentionDays) {
+function pruneArchives(logFilePath, retentionDays, maxFiles) {
+  if (retentionDays === 0) return;
   const logDirPath = path.dirname(logFilePath);
-  fs.mkdirSync(logDirPath, { recursive: true });
-
-  if (!fs.existsSync(logFilePath) || retentionDays === 0) {
-    return;
-  }
-
-  const cutoffTimestamp = Date.now() - retentionDays * MS_IN_DAY;
-  const currentContent = fs.readFileSync(logFilePath, "utf8");
-  if (!currentContent) {
-    return;
-  }
-
-  const lines = currentContent.split("\n");
-  const retainedLines = [];
-
-  for (const line of lines) {
-    if (!line) {
-      continue;
-    }
-
-    try {
-      const parsed = JSON.parse(line);
-      const timestamp = Date.parse(parsed.timestamp);
-
-      if (Number.isFinite(timestamp) && timestamp < cutoffTimestamp) {
-        continue;
+  const base = path.basename(logFilePath);
+  const now = Date.now();
+  const archiveName = /^[0-9]{13}-[0-9]+-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.log$/i;
+  const archives = fs.readdirSync(logDirPath)
+    .filter(name => name.startsWith(`${base}.`) && archiveName.test(name.slice(base.length + 1)))
+    .flatMap(name => {
+      const file = path.join(logDirPath, name);
+      try {
+        const rotatedAt = Number(name.slice(base.length + 1, base.length + 14));
+        return [{ file, mtimeMs: fs.statSync(file).mtimeMs, rotatedAt }];
+      } catch (error) {
+        if (error.code === "ENOENT") return [];
+        throw error;
       }
-    } catch {
-      // Keep non-JSON lines instead of risking data loss.
+    })
+    .sort((a, b) => (b.rotatedAt || b.mtimeMs) - (a.rotatedAt || a.mtimeMs));
+
+  let kept = 0;
+  for (const archive of archives) {
+    // An overlapping process can still have an append open on a just-rotated inode.
+    if (now - (archive.rotatedAt || archive.mtimeMs) < 60_000) continue;
+    if ((retentionDays > 0 && archive.mtimeMs < now - retentionDays * MS_IN_DAY) || kept >= maxFiles) {
+      try {
+        fs.unlinkSync(archive.file);
+      } catch (error) {
+        if (error.code !== "ENOENT") throw error;
+      }
+    } else {
+      kept++;
     }
-
-    retainedLines.push(line);
   }
+}
 
-  if (retainedLines.length === lines.filter(Boolean).length) {
-    return;
+function rotateIfNeeded(logFilePath, maxFileBytes, retentionDays, nextBytes = 0) {
+  let stat;
+  try {
+    stat = fs.statSync(logFilePath);
+  } catch (error) {
+    if (error.code === "ENOENT") return;
+    throw error;
   }
+  const createdAt = stat.birthtimeMs > 0 ? stat.birthtimeMs : stat.mtimeMs;
+  if (stat.size === 0 || (stat.size + nextBytes <= maxFileBytes &&
+      (retentionDays === 0 || createdAt >= Date.now() - MS_IN_DAY))) return;
 
-  const trimmedContent = retainedLines.length > 0 ? `${retainedLines.join("\n")}\n` : "";
-  fs.writeFileSync(logFilePath, trimmedContent, "utf8");
+  const archive = `${logFilePath}.${Date.now()}-${process.pid}-${randomUUID()}.log`;
+  try {
+    fs.renameSync(logFilePath, archive);
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+}
+
+function ensureLogFileReady(logFilePath, retentionDays, maxFileBytes, maxFiles) {
+  fs.mkdirSync(path.dirname(logFilePath), { recursive: true });
+  pruneArchives(logFilePath, retentionDays, maxFiles);
+  rotateIfNeeded(logFilePath, maxFileBytes, retentionDays);
 }
 
 function normalizeLokiLabelName(name) {
@@ -193,13 +214,15 @@ function createLogger(options = {}) {
   );
   const retentionDays =
     options.retentionDays === undefined ? DEFAULT_LOG_RETENTION_DAYS : options.retentionDays;
+  const maxFileBytes = options.maxFileBytes === undefined ? DEFAULT_LOG_MAX_FILE_BYTES : options.maxFileBytes;
+  const maxFiles = options.maxFiles === undefined ? DEFAULT_LOG_MAX_FILES : options.maxFiles;
   const consoleWriter = options.consoleWriter || console;
   const loki = options.loki;
   const fetchImpl = options.fetchImpl;
   const lokiEntries = [];
 
   try {
-    ensureLogFileReady(logFilePath, retentionDays);
+    ensureLogFileReady(logFilePath, retentionDays, maxFileBytes, maxFiles);
   } catch (error) {
     process.stderr.write(
       `[logger] Failed to initialize log file '${logFilePath}': ${error.message}\n`
@@ -207,6 +230,7 @@ function createLogger(options = {}) {
   }
 
   function writeLogLine(line) {
+    rotateIfNeeded(logFilePath, maxFileBytes, retentionDays, Buffer.byteLength(line) + 1);
     fs.appendFileSync(logFilePath, `${line}\n`, "utf8");
   }
 
@@ -285,6 +309,8 @@ function createLoggerFromEnv(env = process.env, options = {}) {
     fetchImpl: options.fetchImpl,
     logFilePath: env.LOG_FILE_PATH || DEFAULT_LOG_FILE_PATH,
     retentionDays,
+    maxFileBytes: readPositiveIntegerFromEnv(env, "LOG_MAX_FILE_BYTES", DEFAULT_LOG_MAX_FILE_BYTES),
+    maxFiles: readPositiveIntegerFromEnv(env, "LOG_MAX_FILES", DEFAULT_LOG_MAX_FILES),
     loki: readLokiConfigFromEnv(env)
   });
 }

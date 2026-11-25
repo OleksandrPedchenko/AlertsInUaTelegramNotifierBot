@@ -47,7 +47,7 @@ async function main() {
   dashboard.version = existing?.dashboard?.version || 0;
   const folderUid = process.env.GRAFANA_FOLDER_UID || existing?.meta?.folderUid || undefined;
   const saved = await api("/api/dashboards/db", {
-    method: "POST", body: JSON.stringify({ dashboard, folderUid, overwrite: true, message: "Update Alerts Bot CPU performance dashboard" })
+    method: "POST", body: JSON.stringify({ dashboard, folderUid, overwrite: true, message: "Update Alerts Bot CPU and RAM performance dashboard" })
   });
   const verified = await api(`/api/dashboards/uid/${uid}`);
   if (verified.dashboard.panels.some(panel => panel.datasource && panel.datasource.uid !== loki.uid)) {
