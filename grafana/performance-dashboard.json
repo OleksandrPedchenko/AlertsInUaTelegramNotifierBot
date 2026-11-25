@@ -1,0 +1,1060 @@
+{
+  "id": null,
+  "uid": "alerts-bot-cpu-performance",
+  "title": "Alerts Bot — CPU & Performance",
+  "tags": [
+    "alerts-bot",
+    "performance"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 41,
+  "version": 1,
+  "refresh": "1m",
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "timepicker": {
+    "quick_ranges": [
+      {
+        "from": "now-24h",
+        "to": "now",
+        "display": "Last 24 hours"
+      },
+      {
+        "from": "now-7d",
+        "to": "now",
+        "display": "Last 7 days"
+      },
+      {
+        "from": "now-30d",
+        "to": "now",
+        "display": "Last 30 days"
+      }
+    ]
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "job",
+        "type": "custom",
+        "query": "alerts,light",
+        "current": {
+          "text": "All",
+          "value": "alerts|light"
+        },
+        "includeAll": true,
+        "allValue": "alerts|light",
+        "options": []
+      },
+      {
+        "name": "cpu_threshold_ms",
+        "type": "textbox",
+        "query": "10",
+        "current": {
+          "text": "10",
+          "value": "10"
+        }
+      },
+      {
+        "name": "run_id",
+        "type": "textbox",
+        "query": "",
+        "current": {
+          "text": "",
+          "value": ""
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Overview",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 1
+      },
+      "collapsed": false
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Executions",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 1,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(count_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | __error__=\"\"[$__range]))",
+          "queryType": "instant",
+          "legendFormat": "Total"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "No measurements yet"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "textMode": "auto",
+        "colorMode": "value"
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Success / failure / skipped",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 1,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (status) (count_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | __error__=\"\"[$__range]))",
+          "queryType": "instant",
+          "legendFormat": "{{status}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "No measurements yet"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "textMode": "auto",
+        "colorMode": "value"
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Average CPU",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 1,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(sum_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | unwrap cpuMs | __error__=\"\" [$__range])) / sum(count_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | __error__=\"\" [$__range]))",
+          "queryType": "instant",
+          "legendFormat": "Average"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "noValue": "No measurements yet"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "textMode": "auto",
+        "colorMode": "value"
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Maximum CPU",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 9,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(max_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | unwrap cpuMs | __error__=\"\"[$__range]))",
+          "queryType": "instant",
+          "legendFormat": "Maximum"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "noValue": "No measurements yet"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "textMode": "auto",
+        "colorMode": "value"
+      }
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "p95 CPU",
+      "description": "95th percentile across the selected jobs and executions.",
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 9,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "quantile_over_time(0.95,{app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | unwrap cpuMs | __error__=\"\"[$__range]) by ()",
+          "queryType": "instant",
+          "legendFormat": "p95"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "noValue": "No measurements yet"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "textMode": "auto",
+        "colorMode": "value"
+      }
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "Average / maximum wall time",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 9,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(sum_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | unwrap wallMs | __error__=\"\" [$__range])) / sum(count_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | __error__=\"\" [$__range]))",
+          "queryType": "instant",
+          "legendFormat": "Average"
+        },
+        {
+          "refId": "B",
+          "expr": "max(max_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | unwrap wallMs | __error__=\"\"[$__range]))",
+          "queryType": "instant",
+          "legendFormat": "Maximum"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "noValue": "No measurements yet"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "textMode": "auto",
+        "colorMode": "value"
+      }
+    },
+    {
+      "id": 8,
+      "type": "row",
+      "title": "CPU consumption over time",
+      "gridPos": {
+        "x": 0,
+        "y": 17,
+        "w": 24,
+        "h": 1
+      },
+      "collapsed": false
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "CPU time by execution (sampled)",
+      "description": "Latest execution in each display interval. Use Detailed execution logs to inspect every run.",
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 18,
+        "w": 24,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "last_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | unwrap cpuMs | __error__=\"\"[$__interval])",
+          "queryType": "range",
+          "legendFormat": "{{job}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "noValue": "No measurements yet"
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Average CPU by job",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 27,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "avg by (job) (avg_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | unwrap cpuMs | __error__=\"\"[$__interval]))",
+          "queryType": "range",
+          "legendFormat": "{{job}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "noValue": "No measurements yet"
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Maximum and p95 CPU by job",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 27,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (job) (max_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | unwrap cpuMs | __error__=\"\"[$__interval]))",
+          "queryType": "range",
+          "legendFormat": "max {{job}}"
+        },
+        {
+          "refId": "B",
+          "expr": "quantile_over_time(0.95,{app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | unwrap cpuMs | __error__=\"\"[$__interval]) by (job)",
+          "queryType": "range",
+          "legendFormat": "p95 {{job}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "noValue": "No measurements yet"
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 12,
+      "type": "row",
+      "title": "CPU breakdown",
+      "gridPos": {
+        "x": 0,
+        "y": 35,
+        "w": 24,
+        "h": 1
+      },
+      "collapsed": false
+    },
+    {
+      "id": 13,
+      "type": "barchart",
+      "title": "Average CPU by phase",
+      "description": "Phase times are inclusive. Do not sum nested phases.",
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 36,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "avg by (phase) (avg_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_phase_performance\" | unwrap cpuMs | __error__=\"\"[$__range]))",
+          "queryType": "instant",
+          "legendFormat": "{{phase}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "noValue": "No measurements yet"
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 14,
+      "type": "barchart",
+      "title": "Maximum CPU by phase",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 36,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (phase) (max_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_phase_performance\" | unwrap cpuMs | __error__=\"\"[$__range]))",
+          "queryType": "instant",
+          "legendFormat": "{{phase}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "noValue": "No measurements yet"
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 15,
+      "type": "timeseries",
+      "title": "Phase CPU trend",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 44,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "avg by (phase) (avg_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_phase_performance\" | unwrap cpuMs | __error__=\"\"[$__interval]))",
+          "queryType": "range",
+          "legendFormat": "{{phase}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "noValue": "No measurements yet"
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 16,
+      "type": "timeseries",
+      "title": "Phase wall time trend",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 44,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "avg by (phase) (avg_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_phase_performance\" | unwrap wallMs | __error__=\"\"[$__interval]))",
+          "queryType": "range",
+          "legendFormat": "{{phase}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "noValue": "No measurements yet"
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 17,
+      "type": "row",
+      "title": "Execution behavior",
+      "gridPos": {
+        "x": 0,
+        "y": 52,
+        "w": 24,
+        "h": 1
+      },
+      "collapsed": false
+    },
+    {
+      "id": 18,
+      "type": "timeseries",
+      "title": "Polling vs notifications",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 53,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (notified) (count_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | __error__=\"\"[$__interval]))",
+          "queryType": "range",
+          "legendFormat": "notified={{notified}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "No measurements yet"
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 19,
+      "type": "timeseries",
+      "title": "Image generation",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 53,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (imageGenerated) (count_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | __error__=\"\"[$__interval]))",
+          "queryType": "range",
+          "legendFormat": "image={{imageGenerated}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "No measurements yet"
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "Failures and skipped runs",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 61,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (status) (count_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | __error__=\"\" | status=~\"failure|skipped\" [$__interval]))",
+          "queryType": "range",
+          "legendFormat": "{{status}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "No measurements yet"
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "Executions and notifications",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 61,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(count_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | __error__=\"\"[$__interval]))",
+          "queryType": "range",
+          "legendFormat": "Executions"
+        },
+        {
+          "refId": "B",
+          "expr": "sum(sum_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | unwrap notificationCount | __error__=\"\"[$__interval]))",
+          "queryType": "range",
+          "legendFormat": "Notifications"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "No measurements yet"
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 22,
+      "type": "row",
+      "title": "Cloudflare Workers feasibility",
+      "gridPos": {
+        "x": 0,
+        "y": 69,
+        "w": 24,
+        "h": 1
+      },
+      "collapsed": false
+    },
+    {
+      "id": 23,
+      "type": "stat",
+      "title": "CPU reference threshold",
+      "description": "10 ms is only a reference. Local Node.js CPU differs from Workers CPU.",
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 70,
+        "w": 6,
+        "h": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "vector(${cpu_threshold_ms})",
+          "queryType": "instant",
+          "legendFormat": "Reference"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "noValue": "No measurements yet"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "textMode": "auto",
+        "colorMode": "value"
+      }
+    },
+    {
+      "id": 24,
+      "type": "stat",
+      "title": "Executions above threshold",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 70,
+        "w": 6,
+        "h": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(count_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | __error__=\"\" | cpuMs > ${cpu_threshold_ms} [$__range]))",
+          "queryType": "instant",
+          "legendFormat": "Count"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "No measurements yet"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "textMode": "auto",
+        "colorMode": "value"
+      }
+    },
+    {
+      "id": 25,
+      "type": "stat",
+      "title": "Percentage above threshold",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 70,
+        "w": 6,
+        "h": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 * sum(count_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | __error__=\"\" | cpuMs > ${cpu_threshold_ms} [$__range])) / sum(count_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | __error__=\"\"[$__range]))",
+          "queryType": "instant",
+          "legendFormat": "Percent"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "noValue": "No measurements yet"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "textMode": "auto",
+        "colorMode": "value"
+      }
+    },
+    {
+      "id": 26,
+      "type": "stat",
+      "title": "p95 / maximum CPU",
+      "description": "p95 and maximum across the selected jobs and executions.",
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "gridPos": {
+        "x": 18,
+        "y": 70,
+        "w": 6,
+        "h": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "quantile_over_time(0.95,{app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | unwrap cpuMs | __error__=\"\"[$__range]) by ()",
+          "queryType": "instant",
+          "legendFormat": "p95"
+        },
+        {
+          "refId": "B",
+          "expr": "max(max_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | unwrap cpuMs | __error__=\"\"[$__range]))",
+          "queryType": "instant",
+          "legendFormat": "Maximum"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "noValue": "No measurements yet"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "textMode": "auto",
+        "colorMode": "value"
+      }
+    },
+    {
+      "id": 27,
+      "type": "barchart",
+      "title": "Most expensive phases",
+      "description": "Indicative only: process-wide CPU and native library/runtime differences. Nested phases overlap.",
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 76,
+        "w": 24,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (phase) (max_over_time({app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_phase_performance\" | unwrap cpuMs | __error__=\"\"[$__range]))",
+          "queryType": "instant",
+          "legendFormat": "{{phase}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "noValue": "No measurements yet"
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 28,
+      "type": "row",
+      "title": "Detailed execution logs",
+      "gridPos": {
+        "x": 0,
+        "y": 84,
+        "w": 24,
+        "h": 1
+      },
+      "collapsed": false
+    },
+    {
+      "id": 29,
+      "type": "logs",
+      "title": "Recent executions — search by run ID",
+      "description": "Expand a line for job, status, CPU, wall time, timestamp and runId. Set Run ID to inspect one run.",
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 85,
+        "w": 24,
+        "h": 10
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "{app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_performance\" | __error__=\"\" | runId=~\".*${run_id}.*\"",
+          "queryType": "range",
+          "legendFormat": ""
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "No measurements yet"
+        },
+        "overrides": []
+      },
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "showCommonLabels": false,
+        "wrapLogMessage": false,
+        "prettifyLogMessage": true,
+        "enableLogDetails": true
+      }
+    },
+    {
+      "id": 30,
+      "type": "logs",
+      "title": "Related phase measurements",
+      "description": "Set Run ID above to correlate phases with an execution.",
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 95,
+        "w": 24,
+        "h": 10
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "{app=~\"alerts-tg-bot|poe-notifier\",level=\"info\",job=~\"${job:regex}\"} | json | event=\"job_phase_performance\" | __error__=\"\" | runId=~\".*${run_id}.*\"",
+          "queryType": "range",
+          "legendFormat": ""
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "No measurements yet"
+        },
+        "overrides": []
+      },
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "showCommonLabels": false,
+        "wrapLogMessage": false,
+        "prettifyLogMessage": true,
+        "enableLogDetails": true
+      }
+    }
+  ]
+}

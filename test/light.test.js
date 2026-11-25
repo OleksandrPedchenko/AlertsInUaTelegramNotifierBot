@@ -13,7 +13,7 @@ const { loadLightConfig } = require("../src/jobs/light/config");
 const { effectiveSchedule } = require("../src/jobs/light/effectiveSchedule");
 const { buildGeminiPrompt, changedWindowsForPrompt, trimPeriodsForPrompt } = require("../src/jobs/light/geminiClient");
 const { createDefaultState, createMockServer, renderPoeHtml } = require("../src/jobs/light/mockServer");
-const { parseLightSchedule } = require("../src/jobs/light/parser");
+const { PoeResponse, parseLightSchedule } = require("../src/jobs/light/parser");
 const { findPendingOutageReminder, getChangedDays, getRelevantChangedDays, lightPlugin, previousScheduleForDay } = require("../src/jobs/light/plugin");
 const { createMemoryLogger, createSilentLogger, createTempDir, createTextResponse } = require("./helpers");
 
@@ -340,11 +340,59 @@ test("light parser reads the new POE horizontal grid and ignores its vertical du
   assert.equal(schedule.updatedAt, "Оновлено: 27 жовтня 2026 09:35");
 });
 
+test("POE fast scan extracts validated schedule rows without a document", async () => {
+  const { scanPoeSchedule } = require("../src/jobs/light/poeFastScan");
+  const html = await fs.readFile(path.join(__dirname, "fixtures/poe-new-layout.html"), "utf8");
+  const result = scanPoeSchedule(html);
+  assert.equal(result.days[0].updatedAt, "Оновлено: 27 жовтня 2026 09:35");
+  assert.equal(result.days[0].rows[0].queueKey, "1.1");
+  assert.equal(result.days[0].rows[0].states.length, 48);
+  assert.deepEqual(result.days[0].rows[0].states.slice(16, 20), [2, 2, 2, 3]);
+  assert.equal(scanPoeSchedule("<div class='gpvinfodetail'>ГПВ не заплановано</div>"), null);
+});
+
+test("light parser uses scanned rows for the horizontal grid", async () => {
+  const html = await fs.readFile(path.join(__dirname, "fixtures/poe-new-layout.html"), "utf8");
+  const response = new PoeResponse(html);
+  assert.equal(response.dom, undefined);
+  const schedule = parseLightSchedule(response, 1, 1, { now: new Date("2026-10-27T10:15:00") });
+  assert.equal(schedule.updatedAt, "Оновлено: 27 жовтня 2026 09:35");
+  assert.equal(schedule.today.totalTimeOff, 270);
+  assert.deepEqual(schedule.tomorrow.timePeriods, []);
+});
+
+test("fast scan keeps separate publication times and periods for both days", () => {
+  const table = status => `<table class="gpv-table"><tbody><tr><td>1.1</td>${
+    Array(48).fill(`<td class="gpv-s${status}"></td>`).join("")
+  }</tr></tbody></table>`;
+  const html = `<div class="gpvinfodetail">${table(1)}<div>Оновлено: сьогодні</div></div>
+    <div class="gpvinfodetail">${table(2)}<div>Оновлено: завтра</div></div>`;
+  const response = new PoeResponse(html);
+  assert.equal(response.dom, undefined);
+  const schedule = parseLightSchedule(response, 1, 1);
+  assert.equal(schedule.updatedAt, "Оновлено: сьогодні");
+  assert.equal(schedule.tomorrow.updatedAt, "Оновлено: завтра");
+  assert.equal(schedule.today.totalTimeOn, 1440);
+  assert.equal(schedule.tomorrow.totalTimeOff, 1440);
+});
+
 test("light parser rejects HTML without the selected schedule row", () => {
   assert.throws(
     () => parseLightSchedule("<html><body>Service unavailable</body></html>", 2, 2),
     /schedule/i
   );
+});
+
+test("light parser reuses one parsed POE response for multiple queues", () => {
+  const html = renderPoeHtml(createDefaultState());
+  const response = new PoeResponse(html);
+  const now = new Date("2026-11-17T17:00:00Z");
+  for (const [queue, subQueue] of [[1, 1], [2, 2], [3, 1]]) {
+    assert.deepEqual(
+      parseLightSchedule(response, queue, subQueue, { now }),
+      parseLightSchedule(html, queue, subQueue, { now })
+    );
+  }
 });
 
 test("light parser treats an explicit table-free POE no-schedule response as all-day light", () => {

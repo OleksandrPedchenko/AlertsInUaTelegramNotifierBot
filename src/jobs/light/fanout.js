@@ -5,6 +5,7 @@ const { createEnvReader } = require("../../lib/config");
 const { requestWithRetry } = require("../../lib/httpClient");
 const { acquireRunLock } = require("../../lib/lock");
 const { createLogger } = require("../../lib/logger");
+const { createPerformance } = require("../../lib/performance");
 const { normalizeNotifications } = require("../../lib/runner");
 const { readJobState, writeJobState } = require("../../lib/stateStore");
 const { sendTelegramNotification } = require("../../lib/telegramNotifier");
@@ -12,7 +13,7 @@ const { loadLightConfig } = require("./config");
 const { buildGeminiUrl, changedWindowsForPrompt, extractGeminiText, trimPeriodsForPrompt } = require("./geminiClient");
 const { effectiveDay } = require("./effectiveSchedule");
 const { processGav } = require("./gav");
-const { parseLightSchedule } = require("./parser");
+const { PoeResponse, parseLightSchedule } = require("./parser");
 const { loadSubscriptions } = require("./subscriptions");
 const { buildCurrentLightState, dateFromCurrentMinute, dayFingerprint, fetchPoeData, getRelevantChangedDays, getCurrentMinute, lightPlugin, previousScheduleForDay, readStubData } = require("./plugin");
 
@@ -195,21 +196,32 @@ async function runFanout(env = process.env, options = {}) {
   }
   const ownsLogger = !options.logger;
   const logger = options.logger || createLogger({ cwd, fetchImpl: options.fetchImpl, ...config.log });
-  const release = await acquireRunLock(config.job.lockFilePath);
-  if (!release) return { skipped: true };
+  const performance = options.performance || createPerformance("light", logger);
+  performance.setLogger(logger);
+  let status = "failure";
+  let release;
   try {
+    release = await acquireRunLock(config.job.lockFilePath);
+    if (!release) {
+      status = "skipped";
+      return { skipped: true };
+    }
     logger.info("Starting light fan-out", { jobName: "light", subscriptions: subscriptions.length });
-    const deps = { logger, requestWithRetry, fetchImpl: options.fetchImpl };
-    const response = config.job.useStub ? await readStubData(config) : await fetchPoeData(config, deps);
+    const deps = { logger, requestWithRetry, fetchImpl: options.fetchImpl, performance };
+    const response = await performance.phase("fetch_http", () => config.job.useStub ? readStubData(config) : fetchPoeData(config, deps));
     logger.info("POE schedule fetched", { jobName: "light", responseStatus: response.getStatus });
     const currentMinute = Number.isInteger(config.job.currentMinute)
       ? config.job.currentMinute : getCurrentMinute();
     const schedules = new Map();
+    let parsed;
     for (const { queue, subQueue } of subscriptions) {
       const queueKey = `${queue}.${subQueue}`;
       if (!schedules.has(queueKey)) {
-        schedules.set(queueKey, parseLightSchedule(response.html, queue, subQueue, {
-          now: dateFromCurrentMinute(currentMinute)
+        schedules.set(queueKey, performance.phaseSync("parse_html", () => {
+          parsed ||= new PoeResponse(response.html);
+          return parseLightSchedule(parsed, queue, subQueue, {
+            now: dateFromCurrentMinute(currentMinute)
+          });
         }));
       }
     }
@@ -217,26 +229,30 @@ async function runFanout(env = process.env, options = {}) {
     for (const subscription of destinations) {
       const queueKey = `${subscription.queue}.${subscription.subQueue}`;
       const stateKey = `light:${queueKey}:chat:${subscription.chatId}`;
-      const previousRecord = await readJobState(config.job.stateFilePath, stateKey);
+      const previousRecord = await performance.phase("load_state", () => readJobState(config.job.stateFilePath, stateKey));
       const previousState = previousRecord?.state || null;
       const subscriberConfig = subscription.config;
-      const currentState = buildCurrentLightState(schedules.get(queueKey), subscriberConfig, previousState, response);
-      const fingerprint = lightPlugin.getStateFingerprint(currentState);
-      const previousFingerprint = previousRecord?.fingerprint ||
-        (previousState && lightPlugin.getStateFingerprint(previousState));
-      const changed = previousFingerprint !== fingerprint;
-      items.push({ queueKey, stateKey, previousState, previousRecord, currentState,
-        fingerprint, changed, config: subscriberConfig });
+      items.push(performance.phaseSync("build_current_state", () => {
+        const currentState = buildCurrentLightState(schedules.get(queueKey), subscriberConfig, previousState, response);
+        const fingerprint = lightPlugin.getStateFingerprint(currentState);
+        const previousFingerprint = previousRecord?.fingerprint ||
+          (previousState && lightPlugin.getStateFingerprint(previousState));
+        const changed = previousFingerprint !== fingerprint;
+        return { queueKey, stateKey, previousState, previousRecord, currentState,
+          fingerprint, changed, config: subscriberConfig };
+      }));
     }
-    const summaries = await prepareGeminiSummaries(items, config, deps);
+    const summaries = await performance.phase("gemini_processing", () => prepareGeminiSummaries(items, config, deps));
     const failures = [];
     let notificationCount = 0;
     const lastSentAt = new Map();
     for (const item of items) {
       try {
-        if (!lightPlugin.shouldNotify({ previousState: item.previousState, changed: item.changed, config: item.config, currentState: item.currentState })) {
-          await writeJobState(config.job.stateFilePath, item.stateKey, item.currentState, item.fingerprint);
-          await lightPlugin.syncTodayPin({ config: item.config, stateKey: item.stateKey, currentState: item.currentState, deps });
+        if (!performance.phaseSync("compare_schedule", () => lightPlugin.shouldNotify({ previousState: item.previousState, changed: item.changed, config: item.config, currentState: item.currentState }))) {
+          await performance.phase("save_state", () => writeJobState(config.job.stateFilePath, item.stateKey, item.currentState, item.fingerprint));
+          await performance.phase("sync_today_pin", () => lightPlugin.syncTodayPin({
+            config: item.config, stateKey: item.stateKey, currentState: item.currentState, deps
+          }));
           continue;
         }
         const deliveryDeps = {
@@ -245,26 +261,27 @@ async function runFanout(env = process.env, options = {}) {
             [day, summaries.get(item.changeCacheKeys?.[day]) || ""]
           ))
         };
-        const notifications = normalizeNotifications(await lightPlugin.buildNotification({
+        const notifications = normalizeNotifications(await performance.phase("prepare_notification", () => lightPlugin.buildNotification({
           previousState: item.previousState,
           currentState: item.currentState,
           changed: item.changed,
           config: item.config,
           deps: deliveryDeps
-        }));
+        })));
         for (const notification of notifications) {
           const chatId = item.config.telegram.chatId;
           const waitMs = 1100 - (Date.now() - (lastSentAt.get(chatId) || 0));
           if (waitMs > 0) await new Promise(resolve => setTimeout(resolve, waitMs));
-          const delivered = await sendTelegramNotification(notification, item.config.telegram, {
+          const delivered = await performance.phase("send_telegram", () => sendTelegramNotification(notification, item.config.telegram, {
             ...deps,
             onSent: (message, kind) => lightPlugin.afterTelegramSend({
               config: item.config, stateKey: item.stateKey, previousState: item.previousState,
               currentState: item.currentState, notification, message, kind, deps
             })
-          });
+          }));
           lastSentAt.set(chatId, Date.now());
           notificationCount += delivered;
+          performance.addNotifications(delivered);
           logger.info("Light notification delivered", {
             jobName: "light", queue: item.queueKey, chatId, type: notification.type
           });
@@ -275,22 +292,30 @@ async function runFanout(env = process.env, options = {}) {
             deps: deliveryDeps
           });
           const savedState = updated || item.currentState;
-          await writeJobState(config.job.stateFilePath, item.stateKey, savedState,
-            lightPlugin.getStateFingerprint(savedState));
-          await lightPlugin.syncTodayPin({ config: item.config, stateKey: item.stateKey, currentState: item.currentState, deps });
+          await performance.phase("save_state", () => writeJobState(config.job.stateFilePath, item.stateKey, savedState,
+            lightPlugin.getStateFingerprint(savedState)));
+          await performance.phase("sync_today_pin", () => lightPlugin.syncTodayPin({
+            config: item.config, stateKey: item.stateKey, currentState: item.currentState, deps
+          }));
         }
       } catch (error) {
         failures.push(item.stateKey);
         logger.error("Light subscription failed", { jobName: "light", stateKey: item.stateKey, error });
       }
     }
-    notificationCount += await processGav(subscriptions, config, { ...deps, lastSentAt });
+    const gavCount = await performance.phase("gav_fanout", () => processGav(subscriptions, config, { ...deps, lastSentAt }));
+    notificationCount += gavCount;
     logger.info("Light fan-out completed", { jobName: "light", subscriptions: items.length, notificationCount, failures: failures.length });
     if (failures.length) throw new Error(`Failed light subscriptions: ${failures.join(", ")}`);
+    status = "success";
     return { skipped: false, subscriptions: items.length, notificationCount };
   } finally {
-    await release();
-    if (ownsLogger) await logger.flush?.();
+    try {
+      if (release) await release();
+    } finally {
+      if (!options.performance) performance.finish(status);
+      if (ownsLogger) await logger.flush?.();
+    }
   }
 }
 

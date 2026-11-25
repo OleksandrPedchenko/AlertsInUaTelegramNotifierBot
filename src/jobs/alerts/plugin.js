@@ -167,9 +167,9 @@ const alertsPlugin = {
       useStub: config.job.useStub
     });
 
-    const response = config.job.useStub
-      ? await readStubResponse(config)
-      : await fetchAlertsFromApi(config, deps);
+    const response = await deps.performance.phase("fetch_http", () => config.job.useStub
+      ? readStubResponse(config)
+      : fetchAlertsFromApi(config, deps));
 
     if (config.job.useStub) {
       deps.logger.warn("Stub mode enabled. External API request skipped", {

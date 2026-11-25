@@ -4,6 +4,7 @@ const { createEnvReader } = require("./config");
 const { requestWithRetry } = require("./httpClient");
 const { acquireRunLock } = require("./lock");
 const { createLogger } = require("./logger");
+const { createPerformance } = require("./performance");
 const { readJobState, writeJobState } = require("./stateStore");
 const { sendTelegramNotification } = require("./telegramNotifier");
 
@@ -83,25 +84,25 @@ async function runPluginJob(plugin, env = process.env, options = {}) {
       fetchImpl: options.fetchImpl,
       ...(config.log || {})
     });
-
-  const lockFilePath = plugin.getLockFilePath(config);
-  const releaseLock = await acquireRunLock(lockFilePath);
-  if (!releaseLock) {
-    logger.warn("Another job instance is already running; skipping this run", {
-      jobName: plugin.name,
-      lockFilePath
-    });
-    if (ownsLogger) {
-      await logger.flush?.();
-    }
-    return { jobName: plugin.name, skipped: true };
-  }
+  const performance = options.performance || createPerformance(plugin.name, logger);
+  performance.setLogger(logger);
+  let status = "failure";
+  let releaseLock;
 
   try {
+    const lockFilePath = plugin.getLockFilePath(config);
+    releaseLock = await acquireRunLock(lockFilePath);
+    if (!releaseLock) {
+      status = "skipped";
+      logger.warn("Another job instance is already running; skipping this run", {
+        jobName: plugin.name, lockFilePath
+      });
+      return { jobName: plugin.name, skipped: true };
+    }
     const stateFilePath = plugin.getStateFilePath(config);
     const initialStateKey = plugin.getStateKey(config);
     let previousRecord = initialStateKey
-      ? await readJobState(stateFilePath, initialStateKey)
+      ? await performance.phase("load_state", () => readJobState(stateFilePath, initialStateKey))
       : null;
 
     const deps = {
@@ -109,7 +110,8 @@ async function runPluginJob(plugin, env = process.env, options = {}) {
       requestWithRetry,
       previousRecord,
       previousState: previousRecord ? previousRecord.state : null,
-      fetchImpl: options.fetchImpl
+      fetchImpl: options.fetchImpl,
+      performance
     };
 
     logger.info("Starting plugin job", {
@@ -122,7 +124,7 @@ async function runPluginJob(plugin, env = process.env, options = {}) {
     const stateKey = plugin.getStateKey(config, currentState);
 
     if (stateKey !== initialStateKey) {
-      previousRecord = await readJobState(stateFilePath, stateKey);
+      previousRecord = await performance.phase("load_state", () => readJobState(stateFilePath, stateKey));
     }
 
     const previousState = previousRecord ? previousRecord.state : null;
@@ -130,7 +132,7 @@ async function runPluginJob(plugin, env = process.env, options = {}) {
     const currentFingerprint = plugin.getStateFingerprint(currentState);
     const changed = previousFingerprint !== currentFingerprint;
 
-    const shouldNotify =
+    const shouldNotify = performance.phaseSync("compare_schedule", () =>
       typeof plugin.shouldNotify === "function"
         ? plugin.shouldNotify({
             previousState,
@@ -141,18 +143,19 @@ async function runPluginJob(plugin, env = process.env, options = {}) {
             changed,
             config
           })
-        : changed;
+        : changed);
 
     if (!shouldNotify) {
-      await writeJobState(stateFilePath, stateKey, currentState, currentFingerprint, {
+      await performance.phase("save_state", () => writeJobState(stateFilePath, stateKey, currentState, currentFingerprint, {
         jobName: plugin.name
-      });
+      }));
       await plugin.syncTodayPin?.({ config, stateKey, currentState, deps });
       logger.info("State unchanged; notification skipped", {
         jobName: plugin.name,
         stateKey,
         stateFilePath
       });
+      status = "success";
       return {
         jobName: plugin.name,
         skipped: false,
@@ -161,7 +164,7 @@ async function runPluginJob(plugin, env = process.env, options = {}) {
       };
     }
 
-    const notificationOutput = await plugin.buildNotification({
+    const notificationOutput = await performance.phase("prepare_notification", () => plugin.buildNotification({
       previousState,
       previousRecord,
       currentState,
@@ -170,18 +173,19 @@ async function runPluginJob(plugin, env = process.env, options = {}) {
       changed,
       config,
       deps
-    });
+    }));
     const notifications = normalizeNotifications(notificationOutput);
 
     if (notifications.length === 0) {
-      await writeJobState(stateFilePath, stateKey, currentState, currentFingerprint, {
+      await performance.phase("save_state", () => writeJobState(stateFilePath, stateKey, currentState, currentFingerprint, {
         jobName: plugin.name
-      });
+      }));
       await plugin.syncTodayPin?.({ config, stateKey, currentState, deps });
       logger.info("Notification text is empty; notification skipped", {
         jobName: plugin.name,
         stateKey
       });
+      status = "success";
       return {
         jobName: plugin.name,
         skipped: false,
@@ -192,13 +196,15 @@ async function runPluginJob(plugin, env = process.env, options = {}) {
 
     let deliveredMessages = 0;
     for (const notification of notifications) {
-      deliveredMessages += await sendTelegramNotification(notification, config.telegram, {
+      const delivered = await performance.phase("send_telegram", () => sendTelegramNotification(notification, config.telegram, {
         fetchImpl: options.fetchImpl,
         logger,
         onSent: (message, kind) => plugin.afterTelegramSend?.({
           config, stateKey, previousState, currentState, notification, message, kind, deps
         })
-      });
+      }));
+      deliveredMessages += delivered;
+      performance.addNotifications(delivered);
       const updatedState = typeof plugin.afterNotificationSuccess === "function"
         ? await plugin.afterNotificationSuccess({
             previousState,
@@ -213,9 +219,9 @@ async function runPluginJob(plugin, env = process.env, options = {}) {
           })
         : null;
       const stateToSave = updatedState || currentState;
-      await writeJobState(stateFilePath, stateKey, stateToSave, plugin.getStateFingerprint(stateToSave), {
+      await performance.phase("save_state", () => writeJobState(stateFilePath, stateKey, stateToSave, plugin.getStateFingerprint(stateToSave), {
         jobName: plugin.name
-      });
+      }));
       await plugin.syncTodayPin?.({ config, stateKey, currentState, deps });
     }
     logger.info("Notification step completed", {
@@ -225,6 +231,7 @@ async function runPluginJob(plugin, env = process.env, options = {}) {
       stateFilePath
     });
 
+    status = "success";
     return {
       jobName: plugin.name,
       skipped: false,
@@ -232,9 +239,11 @@ async function runPluginJob(plugin, env = process.env, options = {}) {
       changed
     };
   } finally {
-    await releaseLock();
-    if (ownsLogger) {
-      await logger.flush?.();
+    try {
+      if (releaseLock) await releaseLock();
+    } finally {
+      if (!options.performance) performance.finish(status);
+      if (ownsLogger) await logger.flush?.();
     }
   }
 }
