@@ -28,6 +28,23 @@ test("p95 panels group raw runs before calculating the percentile", () => {
   assert.match(panel("p95 \/ maximum CPU").targets[0].expr, /quantile_over_time\(0\.95,.*\) by \(\)/);
 });
 
+test("existing performance dashboard includes job and phase memory views", () => {
+  const dashboard = require("../grafana/performance-dashboard.json");
+  const panel = title => dashboard.panels.find(item => item.title === title);
+  assert.equal(dashboard.uid, "alerts-bot-cpu-performance");
+  for (const [title, field] of [
+    ["Maximum peak RSS", "peakRssBytes"],
+    ["Maximum sampled heap", "peakObservedHeapUsedBytes"],
+    ["RSS over time", "rssBytes"],
+    ["JavaScript heap over time", "heapUsedBytes"],
+    ["Heap utilization", "heapUtilizationPercent"],
+    ["Memory change by phase", "rssDeltaBytes"]
+  ]) {
+    assert.ok(panel(title), `${title} panel is missing`);
+    assert.ok(panel(title).targets.some(target => target.expr.includes(`unwrap ${field}`)));
+  }
+});
+
 test("dashboard deploy uses existing Loki, reuses UID, and validates every panel query", async () => {
   let saved;
   let queries = 0;
@@ -68,7 +85,7 @@ test("dashboard deploy uses existing Loki, reuses UID, and validates every panel
     await execute(process.execPath, [script], { env });
     assert.equal(saved.id, 7);
     assert.equal(saved.version, 2);
-    assert.equal(queries, 56);
+    assert.equal(queries, saved.panels.flatMap(panel => panel.targets || []).length * 2);
   } finally {
     server.close();
   }
